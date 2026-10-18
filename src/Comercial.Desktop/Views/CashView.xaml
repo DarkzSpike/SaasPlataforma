@@ -1,0 +1,37 @@
+<UserControl x:Class="Comercial.Desktop.Views.CashView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel>
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+        <Border Style="{StaticResource Card}" ClipToBounds="True">
+            <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Sessions}" AutomationProperties.Name="Sessões de caixa">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Abertura" Binding="{Binding Opened}" Width="120"/>
+                    <DataGridTextColumn Header="Fechamento" Binding="{Binding Closed}" Width="120"/>
+                    <DataGridTextColumn Header="Situação" Binding="{Binding Status}" Width="100"/>
+                    <DataGridTextColumn Header="Valor inicial" Binding="{Binding Opening}" Width="130"/>
+                    <DataGridTextColumn Header="Esperado" Binding="{Binding Expected}" Width="130"/>
+                    <DataGridTextColumn Header="Contado" Binding="{Binding Declared}" Width="130"/>
+                    <DataGridTemplateColumn Header="Diferença" Width="130">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Difference}" FontWeight="SemiBold">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding DiffNegative}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding DiffPositive}" Value="True"><Setter Property="Foreground" Value="{DynamicResource WarnBrush}"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Justificativa" Binding="{Binding Justification}" Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </DockPanel>
+</UserControl>

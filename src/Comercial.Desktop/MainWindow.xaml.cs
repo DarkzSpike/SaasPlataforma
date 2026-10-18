@@ -5,15 +5,15 @@ namespace Comercial.Desktop;
 
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    public MainWindow(MainViewModel? vm = null)
     {
         InitializeComponent();
-        DataContext = new MainViewModel();
+        DataContext = vm ?? new MainViewModel();
         // F10 finaliza a venda no PDV.
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ =>
+        InputBindings.Add(new KeyBinding(RelayCommand.Sync(_ =>
         {
-            if (((MainViewModel)DataContext).Current is PosViewModel pos && pos.FinishCommand.CanExecute(null)) pos.FinishCommand.Execute(null);
-            return Task.CompletedTask;
+            if (((MainViewModel)DataContext).Current is ShellViewModel { Page: PosViewModel pos } && pos.FinishCommand.CanExecute(null))
+                pos.FinishCommand.Execute(null);
         }), Key.F10, ModifierKeys.None));
     }
 }

@@ -182,6 +182,64 @@ public class CommerceTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyncLife
     }
 
     [Fact]
+    public async Task Lucratividade_calcula_lucro_margem_por_produto_e_exige_modulo_e_permissao()
+    {
+        var t = await api.CreateTenant("luc-" + Guid.NewGuid().ToString("N")[..6]);
+        var p = await api.CreateProduct(t.OwnerToken, "L1", price: 1000, cost: 400);
+        var c = await api.OpenCash(t.OwnerToken, t.StoreId);
+        await Api.Expect(await api.Post("/api/v1/sales", t.OwnerToken, Api.Sale(t.StoreId, c, p, qty: 2, pay: 2000)), HttpStatusCode.Created);
+        await Api.Expect(await api.Post("/api/v1/sales", t.OwnerToken, Api.Sale(t.StoreId, c, p, pay: 900, discount: 100)), HttpStatusCode.Created);
+        var url = $"/api/v1/reports/profitability?from={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}&to={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(1).ToString("O"))}";
+
+        // Plano profissional não inclui Lucratividade: bloqueado no servidor.
+        Assert.Equal("module_not_enabled", await Api.Code(await api.Get(url, t.OwnerToken)));
+        var admin = await api.AdminToken();
+        await Api.Expect(await api.Post($"/admin/v1/tenants/{t.Id}/modules/lucratividade/enable", admin, new { confirmTenantCode = t.Code, reason = "teste lucratividade" }, api.Reauth()), HttpStatusCode.OK);
+
+        var r = await Api.Expect(await api.Get(url, t.OwnerToken), HttpStatusCode.OK);
+        var totals = r.GetProperty("totals");
+        Assert.Equal(2900, totals.GetProperty("revenueCents").GetInt64());
+        Assert.Equal(1200, totals.GetProperty("costCents").GetInt64());
+        Assert.Equal(1700, totals.GetProperty("grossProfitCents").GetInt64());
+        Assert.Equal(100, totals.GetProperty("saleLevelDiscountCents").GetInt64());
+        Assert.Equal(58.6m, totals.GetProperty("marginPercent").GetDecimal());
+        var prod = r.GetProperty("products")[0];
+        Assert.Equal(3m, prod.GetProperty("quantity").GetDecimal());
+        Assert.Equal(1800, prod.GetProperty("grossProfitCents").GetInt64());
+        Assert.Equal(1, r.GetProperty("daily").GetArrayLength());
+
+        // Gerente não tem reports.financial.
+        var (_, manager, _) = await api.CreateUser(t, "manager");
+        Assert.Equal(HttpStatusCode.Forbidden, (await api.Get(url, manager)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Historico_de_vendas_traz_itens_pagamentos_e_operador()
+    {
+        var sale = await Api.Expect(await api.Post("/api/v1/sales", T.OwnerToken, Api.Sale(T.StoreId, cash, product, qty: 2, pay: 2500)), HttpStatusCode.Created);
+        var list = await Api.Expect(await api.Get("/api/v1/sales", T.OwnerToken), HttpStatusCode.OK);
+        var row = list.EnumerateArray().First(s => s.GetProperty("id").GetGuid() == sale.GetProperty("id").GetGuid());
+        Assert.Equal(1, row.GetProperty("itemsCount").GetInt32());
+        Assert.Equal(2m, row.GetProperty("quantity").GetDecimal());
+        Assert.Equal("Dono " + T.Code, row.GetProperty("operatorName").GetString());
+        Assert.Equal(2500, row.GetProperty("payments")[0].GetProperty("amountCents").GetInt64());
+        Assert.Equal(500, row.GetProperty("changeCents").GetInt64());
+        var (_, op, _) = await api.CreateUser(T, "stockist");
+        Assert.Equal(HttpStatusCode.Forbidden, (await api.Get("/api/v1/sales", op)).StatusCode);
+    }
+
+    [Fact]
+    public void Dia_e_mes_seguem_o_fuso_da_loja()
+    {
+        var tz = Comercial.Api.Services.StoreClock.Find("America/Sao_Paulo");
+        // 01:30 UTC de 18/10 ainda é 17/10 em São Paulo (22:30).
+        var start = Comercial.Api.Services.StoreClock.StartOfDay(new DateTimeOffset(2026, 10, 18, 1, 30, 0, TimeSpan.Zero), tz);
+        Assert.Equal(new DateTimeOffset(2026, 10, 17, 3, 0, 0, TimeSpan.Zero), start);
+        var month = Comercial.Api.Services.StoreClock.StartOfMonth(new DateTimeOffset(2026, 11, 1, 2, 0, 0, TimeSpan.Zero), tz);
+        Assert.Equal(new DateTimeOffset(2026, 10, 1, 3, 0, 0, TimeSpan.Zero), month);
+    }
+
+    [Fact]
     public async Task Relatorio_diferencia_faturamento_cancelamentos_e_lucro_bruto()
     {
         var t = await api.CreateTenant("rep-" + Guid.NewGuid().ToString("N")[..6]);

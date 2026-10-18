@@ -139,6 +139,21 @@ public sealed class LocalDatabase
         tx.Commit();
     }
 
+    /// <summary>Busca no catálogo local por nome (parcial), SKU ou código de barras (exatos).</summary>
+    public List<(Guid Id, string Sku, string? Barcode, string Name, long PriceCents)> SearchProducts(string term, int max)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,sku,barcode,name,price_cents FROM products WHERE barcode=$c OR sku=$c OR name LIKE $l ESCAPE '\\' ORDER BY name LIMIT $m";
+        cmd.Parameters.AddWithValue("$c", term);
+        cmd.Parameters.AddWithValue("$l", "%" + term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
+        cmd.Parameters.AddWithValue("$m", max);
+        var list = new List<(Guid, string, string?, string, long)>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add((Guid.Parse(r.GetString(0)), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.GetString(3), r.GetInt64(4)));
+        return list;
+    }
+
     public (Guid Id, string Name, long PriceCents)? FindProduct(string code)
     {
         using var c = Open();

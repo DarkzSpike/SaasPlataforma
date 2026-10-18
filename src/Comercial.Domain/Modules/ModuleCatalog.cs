@@ -110,7 +110,7 @@ public static class ModuleCatalogSeed
             M(ModuleKeys.Finance, "Financeiro avançado", "C - Financeiro", P, "Fluxo de caixa, conciliação, centros de custo.", ModuleKeys.Cash),
             M(ModuleKeys.PayablesReceivables, "Contas a pagar e receber", "C - Financeiro", P, "Vencimentos, parcelas, baixas.", ModuleKeys.Finance),
             M(ModuleKeys.Expenses, "Despesas e custos", "C - Financeiro", P, "Despesas operacionais e comprovantes.", ModuleKeys.Finance),
-            M(ModuleKeys.Profitability, "Lucratividade", "C - Financeiro", P, "Margens com custo histórico.", ModuleKeys.Pdv),
+            M(ModuleKeys.Profitability, "Lucratividade", "C - Financeiro", B, "Lucro bruto e margem por produto e por dia, com custo histórico de cada venda (sem despesas).", ModuleKeys.Pdv),
             // D — Clientes
             M(ModuleKeys.Crm, "CRM", "D - Clientes", P, "Cadastro de clientes e consentimentos."),
             M(ModuleKeys.Loyalty, "Fidelidade", "D - Clientes", P, "Pontos e resgates.", ModuleKeys.Crm, ModuleKeys.Pdv),

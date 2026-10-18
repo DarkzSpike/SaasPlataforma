@@ -180,12 +180,31 @@ public static class TenantEndpoints
         }).RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate, write: true);
         sales.MapGet("/{id:guid}", async (Guid id, ScopedLookup l) => Results.Ok(await l.GetAsync<Sale>(id, q => q.Include(s => s.Items).Include(s => s.Payments))))
             .RequireFeature(ModuleKeys.Pdv, Permissions.SalesRead);
-        sales.MapGet("/", async (AppDbContext db, RequestActor a, DateTimeOffset? from, DateTimeOffset? to) =>
+        // Histórico de vendas: resumo por venda (itens, formas de pagamento, operador). Detalhe completo em /sales/{id}.
+        sales.MapGet("/", async (AppDbContext db, RequestActor a, DateTimeOffset? from, DateTimeOffset? to, int? status) =>
         {
-            var f = from ?? DateTimeOffset.UtcNow.Date; var t = to ?? DateTimeOffset.UtcNow.AddDays(1);
+            var tz = await StoreClock.ZoneAsync(db, a);
+            var f = from ?? StoreClock.StartOfDay(DateTimeOffset.UtcNow, tz);
+            var t = to ?? DateTimeOffset.UtcNow.AddMinutes(1);
+            if (t <= f || t - f > TimeSpan.FromDays(400)) throw new DomainException("invalid_period", "Período inválido (máx. 400 dias).");
             var q = db.Sales.AsNoTracking().Where(s => s.ReceivedAt >= f && s.ReceivedAt < t);
             if (a.UserStoreId is { } st) q = q.Where(s => s.StoreId == st);
-            return Results.Ok(await q.OrderByDescending(s => s.ReceivedAt).Take(500).ToListAsync());
+            if (status is { } stt) q = q.Where(s => s.Status == (SaleStatus)stt);
+            var list = await q.OrderByDescending(s => s.ReceivedAt).Take(500)
+                .Select(s => new
+                {
+                    s.Id, s.ReceivedAt, s.LocalCreatedAt, s.Status, s.SubtotalCents, s.DiscountCents, s.TotalCents, s.ChangeCents,
+                    s.CreatedOffline, s.OperatorUserId, s.CancelReason, s.CancelledAt,
+                    itemsCount = s.Items.Count, quantity = s.Items.Sum(i => i.Quantity),
+                    payments = s.Payments.Select(p => new { p.Method, p.AmountCents }).ToList(),
+                }).ToListAsync();
+            var operators = await db.Users.AsNoTracking().Select(u => new { u.Id, u.DisplayName }).ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+            return Results.Ok(list.Select(s => new
+            {
+                s.Id, s.ReceivedAt, s.LocalCreatedAt, status = s.Status.ToString(), s.SubtotalCents, s.DiscountCents, s.TotalCents, s.ChangeCents,
+                s.CreatedOffline, operatorName = operators.GetValueOrDefault(s.OperatorUserId, "—"), s.CancelReason, s.CancelledAt,
+                s.itemsCount, s.quantity, s.payments,
+            }));
         }).RequireFeature(ModuleKeys.Pdv, Permissions.SalesRead);
         sales.MapPost("/{id:guid}/cancel", async (Guid id, CancelSaleRequest r, SalesService s) =>
         {
@@ -241,13 +260,75 @@ public static class TenantEndpoints
             });
         }).RequireFeature(ModuleKeys.Pdv, Permissions.ReportsRead);
 
+        // ---------- Lucratividade (módulo 12) ----------
+        api.MapGet("/reports/profitability", async (AppDbContext db, RequestActor a, DateTimeOffset from, DateTimeOffset to, Guid? storeId) =>
+        {
+            if (to <= from || to - from > TimeSpan.FromDays(400)) throw new DomainException("invalid_period", "Período inválido (máx. 400 dias).");
+            var tz = await StoreClock.ZoneAsync(db, a);
+            var st = a.UserStoreId ?? storeId;
+            var q = db.Sales.AsNoTracking().Where(s => s.ReceivedAt >= from && s.ReceivedAt < to && s.Status == SaleStatus.Completed);
+            if (st is { } s1) q = q.Where(s => s.StoreId == s1);
+            var sales = await q.Select(s => new { s.Id, s.ReceivedAt, s.TotalCents, s.SubtotalCents, s.DiscountCents }).ToListAsync();
+            var ids = sales.Select(s => s.Id).ToList();
+            var items = await db.SaleItems.AsNoTracking().Where(i => ids.Contains(i.SaleId))
+                .Select(i => new { i.SaleId, i.ProductId, i.ProductName, i.Quantity, i.TotalCents, i.UnitCostCents }).ToListAsync();
+            static long Cost(long unit, decimal qty) => (long)Math.Round(unit * qty);
+
+            // Desconto aplicado no total da venda (não atribuído a um item) é mostrado separadamente.
+            var itemDiscounts = items.GroupBy(i => i.SaleId).ToDictionary(g => g.Key, g => g.Sum(i => i.TotalCents));
+            var saleLevelDiscount = sales.Sum(s => itemDiscounts.GetValueOrDefault(s.Id) - s.TotalCents);
+            var revenue = sales.Sum(s => s.TotalCents);
+            var cost = items.Sum(i => Cost(i.UnitCostCents, i.Quantity));
+            var products = items.GroupBy(i => i.ProductId).Select(g =>
+            {
+                var rev = g.Sum(i => i.TotalCents);
+                var c = g.Sum(i => Cost(i.UnitCostCents, i.Quantity));
+                return new
+                {
+                    productId = g.Key, name = g.First().ProductName, quantity = g.Sum(i => i.Quantity),
+                    revenueCents = rev, costCents = c, grossProfitCents = rev - c,
+                    marginPercent = rev == 0 ? 0 : Math.Round((rev - c) * 100m / rev, 1),
+                };
+            }).OrderByDescending(p => p.grossProfitCents).ToList();
+            var costBySale = items.GroupBy(i => i.SaleId).ToDictionary(g => g.Key, g => g.Sum(i => Cost(i.UnitCostCents, i.Quantity)));
+            var daily = sales.GroupBy(s => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(s.ReceivedAt, tz).DateTime)).OrderBy(g => g.Key)
+                .Select(g => new
+                {
+                    date = g.Key, salesCount = g.Count(), revenueCents = g.Sum(s => s.TotalCents),
+                    costCents = g.Sum(s => costBySale.GetValueOrDefault(s.Id)),
+                    grossProfitCents = g.Sum(s => s.TotalCents - costBySale.GetValueOrDefault(s.Id)),
+                }).ToList();
+            return Results.Ok(new
+            {
+                from, to, storeId = st, timeZone = tz.Id,
+                totals = new
+                {
+                    salesCount = sales.Count, revenueCents = revenue, costCents = cost, grossProfitCents = revenue - cost,
+                    marginPercent = revenue == 0 ? 0 : Math.Round((revenue - cost) * 100m / revenue, 1),
+                    saleLevelDiscountCents = saleLevelDiscount,
+                },
+                products, daily,
+                note = "Lucro bruto estimado = vendas − custo histórico registrado em cada venda. Não inclui despesas, impostos nem taxas de cartão; não é resultado contábil.",
+            });
+        }).RequireFeature(ModuleKeys.Profitability, Permissions.ReportsFinancial);
+
         // ---------- Dashboard do proprietário (app móvel) ----------
         api.MapGet("/mobile/dashboard", async (AppDbContext db, RequestActor a, FeatureAuthorization f) =>
         {
             var now = DateTimeOffset.UtcNow;
-            var today = new DateTimeOffset(now.Date, TimeSpan.Zero);
-            var month = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-            var monthSales = await db.Sales.AsNoTracking().Where(s => s.ReceivedAt >= month && s.Status == SaleStatus.Completed).Select(s => new { s.TotalCents, s.ReceivedAt }).ToListAsync();
+            var tz = await StoreClock.ZoneAsync(db, a);
+            var today = StoreClock.StartOfDay(now, tz);
+            var month = StoreClock.StartOfMonth(now, tz);
+            var monthSales = await db.Sales.AsNoTracking().Where(s => s.ReceivedAt >= month && s.Status == SaleStatus.Completed).Select(s => new { s.Id, s.TotalCents, s.ReceivedAt }).ToListAsync();
+            long? todayProfit = null, monthProfit = null;
+            if (a.Permissions.Contains(Permissions.ReportsFinancial))
+            {
+                var ids = monthSales.Select(s => s.Id).ToList();
+                var costs = (await db.SaleItems.AsNoTracking().Where(i => ids.Contains(i.SaleId)).Select(i => new { i.SaleId, i.UnitCostCents, i.Quantity }).ToListAsync())
+                    .GroupBy(i => i.SaleId).ToDictionary(g => g.Key, g => g.Sum(i => (long)Math.Round(i.UnitCostCents * i.Quantity)));
+                monthProfit = monthSales.Sum(s => s.TotalCents - costs.GetValueOrDefault(s.Id));
+                todayProfit = monthSales.Where(s => s.ReceivedAt >= today).Sum(s => s.TotalCents - costs.GetValueOrDefault(s.Id));
+            }
             var lowStock = await (from b in db.StockBalances join p in db.Products on b.ProductId equals p.Id where b.Quantity <= p.MinStock && p.IsActive select b.ProductId).CountAsync();
             var devices = await db.Devices.AsNoTracking().Where(d => d.Status == DeviceStatus.Active).Select(d => new { d.Id, d.Name, d.LastSyncAt, d.AppVersion }).ToListAsync();
             var openCash = await db.CashSessions.AsNoTracking().CountAsync(c => c.Status == CashSessionStatus.Open);
@@ -257,6 +338,10 @@ public static class TenantEndpoints
                 todayRevenueCents = monthSales.Where(s => s.ReceivedAt >= today).Sum(s => s.TotalCents),
                 todaySalesCount = monthSales.Count(s => s.ReceivedAt >= today),
                 monthRevenueCents = monthSales.Sum(s => s.TotalCents),
+                monthSalesCount = monthSales.Count,
+                todayGrossProfitCents = todayProfit,
+                monthGrossProfitCents = monthProfit,
+                timeZone = tz.Id,
                 openCashSessions = openCash,
                 lowStockProducts = lowStock,
                 license = await f.LicenseStateAsync(),

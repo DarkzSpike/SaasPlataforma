@@ -63,8 +63,12 @@ Os 42 módulos do pedido estão no catálogo com dependências. O status reflete
 | Status | Módulos |
 |---|---|
 | Disponível | PDV, Produtos, Estoque, Caixa, Horários, White Label |
-| Beta | Fiscal (sem SEFAZ), Usuários avançados, Caixa por operador, Múltiplas lojas (só limites), App do proprietário (API pronta) |
-| Planejado (não habilitável) | os outros 31 (compras, financeiro, CRM, fidelidade, e-commerce, balanças, BI etc.) |
+| Beta | Fiscal (sem SEFAZ), Usuários avançados, Caixa por operador, Múltiplas lojas (só limites), App do proprietário (API pronta), Lucratividade (lucro e margem por produto e por dia) |
+| Planejado (não habilitável) | os outros 30 (compras, financeiro, CRM, fidelidade, e-commerce, balanças, BI etc.) |
+
+O PDV Windows tem área do dono (Painel, Histórico com cancelamento, Lucro, Estoque, Caixas). Cada aba só aparece
+se a empresa contratou o módulo e o usuário tem a permissão — e o servidor revalida tudo. Capturas das telas
+podem ser geradas com `Comercial.Desktop.exe --snapshot <pasta>` (dados de exemplo, sem servidor).
 
 Dependências (exemplos): PDV → Produtos, Estoque, Caixa · Estoque → Produtos · Fiscal → PDV · Fidelidade → CRM, PDV ·
 Compras → Fornecedores, Produtos, Estoque. Desativar módulo com dependente habilitado ou com pendência (caixa aberto,
