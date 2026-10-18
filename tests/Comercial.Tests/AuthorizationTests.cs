@@ -134,7 +134,7 @@ public class AuthorizationTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyn
         // Faltando dependência: pdv não fica efetivo.
         Assert.DoesNotContain("pdv", Comercial.Api.Services.LicenseService.Resolve(["pdv", "produtos", "caixa"], catalog));
         // Planejado nunca fica efetivo, mesmo habilitado no banco.
-        Assert.DoesNotContain("crm", Comercial.Api.Services.LicenseService.Resolve(["crm"], catalog));
+        Assert.DoesNotContain("ecommerce", Comercial.Api.Services.LicenseService.Resolve(["produtos", "estoque", "ecommerce"], catalog));
         // Ciclo artificial é recusado.
         var a = new Comercial.Domain.Modules.ModuleDefinition { Key = "a", Status = Comercial.Domain.Modules.ModuleStatus.Released, Dependencies = [new() { ModuleKey = "a", DependsOnKey = "b" }] };
         var b = new Comercial.Domain.Modules.ModuleDefinition { Key = "b", Status = Comercial.Domain.Modules.ModuleStatus.Released, Dependencies = [new() { ModuleKey = "b", DependsOnKey = "a" }] };

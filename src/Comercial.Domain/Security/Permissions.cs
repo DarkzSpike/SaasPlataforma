@@ -44,12 +44,29 @@ public static class Permissions
     public const string UsersManage = "users.manage";
     public const string DevicesManage = "devices.manage";
     public const string SupportApprove = "support.approve";
+    public const string SalesReturn = "sales.return";
+    /// <summary>Resolver vendas offline recusadas (reenviar com preço atual ou descartar com motivo).</summary>
+    public const string SyncReconcile = "sync.reconcile";
+    public const string SuppliersManage = "suppliers.manage";
+    public const string PurchasesManage = "purchases.manage";
+    public const string PurchasesApprove = "purchases.approve";
+    public const string PurchasesReceive = "purchases.receive";
+    public const string CustomersRead = "customers.read";
+    public const string CustomersManage = "customers.manage";
+    /// <summary>Exportar ou anonimizar dados pessoais de clientes (LGPD).</summary>
+    public const string CustomersPrivacy = "customers.privacy";
+    public const string LoyaltyManage = "loyalty.manage";
+    public const string FinanceRead = "finance.read";
+    public const string FinanceManage = "finance.manage";
+    public const string ReportsExport = "reports.export";
 
     public static readonly string[] All =
     [
         ProductsRead, ProductsWrite, StockRead, StockEntry, StockAdjust, SalesCreate, SalesRead,
         SalesCancel, SalesDiscountHigh, CashOperate, CashReview, OperatingOpenClose, OperatingCorrect,
-        FiscalEmit, FiscalRead, ReportsRead, ReportsFinancial, UsersManage, DevicesManage, SupportApprove
+        FiscalEmit, FiscalRead, ReportsRead, ReportsFinancial, UsersManage, DevicesManage, SupportApprove,
+        SalesReturn, SyncReconcile, SuppliersManage, PurchasesManage, PurchasesApprove, PurchasesReceive,
+        CustomersRead, CustomersManage, CustomersPrivacy, LoyaltyManage, FinanceRead, FinanceManage, ReportsExport
     ];
 
     private static readonly Dictionary<string, string[]> RoleMap = new()
@@ -59,11 +76,13 @@ public static class Permissions
         [
             ProductsRead, ProductsWrite, StockRead, StockEntry, StockAdjust, SalesCreate, SalesRead,
             SalesCancel, SalesDiscountHigh, CashOperate, CashReview, OperatingOpenClose, OperatingCorrect,
-            FiscalEmit, FiscalRead, ReportsRead, UsersManage, DevicesManage
+            FiscalEmit, FiscalRead, ReportsRead, UsersManage, DevicesManage,
+            SalesReturn, SyncReconcile, SuppliersManage, PurchasesManage, PurchasesApprove, PurchasesReceive,
+            CustomersRead, CustomersManage, FinanceRead, ReportsExport
         ],
-        [Roles.Operator] = [ProductsRead, StockRead, SalesCreate, SalesRead, CashOperate, OperatingOpenClose, FiscalEmit],
-        [Roles.Stockist] = [ProductsRead, ProductsWrite, StockRead, StockEntry, StockAdjust],
-        [Roles.Finance] = [SalesRead, CashReview, FiscalRead, ReportsRead, ReportsFinancial],
+        [Roles.Operator] = [ProductsRead, StockRead, SalesCreate, SalesRead, CashOperate, OperatingOpenClose, FiscalEmit, CustomersRead, CustomersManage],
+        [Roles.Stockist] = [ProductsRead, ProductsWrite, StockRead, StockEntry, StockAdjust, SuppliersManage, PurchasesManage, PurchasesReceive],
+        [Roles.Finance] = [SalesRead, CashReview, FiscalRead, ReportsRead, ReportsFinancial, FinanceRead, FinanceManage, ReportsExport, SuppliersManage],
     };
 
     public static IReadOnlySet<string> Resolve(IEnumerable<string> roles, IEnumerable<(string Permission, bool Granted)> grants)

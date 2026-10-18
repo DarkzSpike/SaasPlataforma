@@ -6,13 +6,13 @@ Data: 18/10/2026. Ambiente: Windows 10, .NET SDK 10.0.402, Node 24, PostgreSQL 1
 
 | | Situação |
 |---|---|
-| Testes automatizados — SQLite | **76 aprovados**, 4 ignorados (específicos de PostgreSQL) |
-| Testes automatizados — PostgreSQL 18 + RLS | **79 aprovados**, 1 ignorado (específico de SQLite); 4 execuções seguidas sem falha |
+| Testes automatizados — SQLite | **100 aprovados**, 4 ignorados (específicos de PostgreSQL) |
+| Testes automatizados — PostgreSQL 18 + RLS | **103 aprovados**, 1 ignorado (específico de SQLite) — `dev/test-pg.ps1` |
 | Caminho de deploy PostgreSQL | `001_inicial.sql` + `002_seguranca_rls.sql` via psql → API como `app_comercial` → dados reais → `backup.ps1` → `restore-test.ps1`: **OK** (`dev/pg-e2e.ps1`) |
 | Compilação | solução inteira em Release com avisos tratados como erro: **0 avisos, 0 erros** |
 | Dependências vulneráveis (NuGet) | **nenhuma** (`dotnet list package --vulnerable --include-transitive`) |
 | Painel web | testado manualmente no navegador: login com MFA, criação de empresa, módulos, publicação de identidade visual |
-| App Windows | compila; abre a janela sem erro; as telas **não** foram exercitadas por automação (a lógica offline por trás delas é testada) |
+| App Windows | compila; 19 telas renderizadas e conferidas por captura (`--snapshot`); fluxos de clique **não** automatizados (a lógica offline e a API por trás são testadas) |
 | App Flutter | **código escrito, não compilado** (sem SDK) |
 | Fiscal (NFC-e/NF-e) | **não integrado à SEFAZ**: só o ciclo de estados; o provedor padrão nunca autoriza |
 | Pagamentos | webhook genérico assinado (HMAC) e idempotente; **nenhum provedor real** conectado |
@@ -46,7 +46,7 @@ foi adicionada além de: EF Core (acesso a dados), Npgsql (driver PostgreSQL), K
 6. **RLS no PostgreSQL** (camada extra): `RlsConnectionInterceptor` + `deploy/postgres/002_seguranca_rls.sql`. **Validado em PostgreSQL 18** (`PostgresSecurityTests`): com SQL direto, sem o filtro do EF, o usuário `app_comercial` só vê o próprio tenant; sem tenant definido não vê nada; não consegue gravar em outro tenant, excluir vendas, alterar movimentos, criar/apagar tabelas nem desligar o RLS.
 7. Painel mostra a empresa selecionada em banner fixo; operações críticas exigem digitar o código da empresa + MFA.
 
-## 5. Modelo de dados (36 tabelas, migração `Inicial`)
+## 5. Modelo de dados (49 tabelas, migrações `Inicial`, `FotosInventarioAvisos`, `ComprasClientesFinanceiro`)
 Segurança: `tenants, stores, users, user_roles, user_permissions, user_sessions, devices, admin_users, audit_logs`
 Módulos/assinatura: `module_catalog, module_dependencies, subscription_plans, plan_modules, subscriptions, tenant_modules, invoices, payment_events`
 Suporte: `support_sessions, support_elevation_requests`
@@ -54,7 +54,8 @@ Identidade visual: `tenant_branding, branding_versions, branding_assets`
 Operação: `categories, products, stock_movements, stock_balances, sales, sale_items, payments, cash_sessions, cash_movements, store_hours, operating_events, fiscal_documents, fiscal_events, sync_events`
 
 Dinheiro em centavos (`long`), quantidades `numeric(18,3)`, custo histórico gravado em cada item vendido.
-Tabelas do pedido **não criadas** por ainda não terem uso: `customers, loyalty_transactions, promotions, expenses, accounts_payable/receivable, service_orders, delivery_orders, suppliers, purchases, notifications, branding_overrides, module_versions, feature_limits` — entram com seus módulos.
+Negócio (etapa 5): `suppliers, purchase_orders, purchase_items, purchase_receipts, customers, loyalty_programs, loyalty_transactions, financial_titles` (contas e despesas), `sale_returns, sale_return_items, notifications, push_tokens`.
+Ainda **não criadas** (sem uso): `promotions, service_orders, delivery_orders, branding_overrides, module_versions, feature_limits` — entram com seus módulos.
 
 ## 6. Catálogo de módulos
 Os 42 módulos do pedido estão no catálogo com dependências. O status reflete o que existe de verdade, e o servidor
@@ -63,8 +64,8 @@ Os 42 módulos do pedido estão no catálogo com dependências. O status reflete
 | Status | Módulos |
 |---|---|
 | Disponível | PDV, Produtos, Estoque, Caixa, Horários, White Label |
-| Beta | Fiscal (sem SEFAZ), Usuários avançados, Caixa por operador, Múltiplas lojas (só limites), App do proprietário (API pronta), Lucratividade (lucro e margem por produto e por dia) |
-| Planejado (não habilitável) | os outros 30 (compras, financeiro, CRM, fidelidade, e-commerce, balanças, BI etc.) |
+| Beta | Fiscal (sem SEFAZ), Usuários avançados, Caixa por operador, Múltiplas lojas (só limites), App do proprietário (API pronta), Lucratividade, Fornecedores, Compras, Financeiro, Contas a pagar/receber, Despesas, CRM, Fidelidade, Trocas e devoluções, Impressoras (recibo não fiscal), Relatórios/exportações CSV, Notificações inteligentes (estoque baixo, quebra de caixa) |
+| Planejado (não habilitável) | os outros 19 (e-commerce, campanhas, balanças, BI, delivery, ordens de serviço etc.) |
 
 Etapa 4 (18/10/2026): janela de troco que só fecha com confirmação; Estoque com entrada de mercadoria, cadastro/
 edição de produto com foto (armazenamento local ou Google Drive) e inventário por contagem; aviso de quebra de caixa
@@ -74,6 +75,22 @@ fuso -03:00 não encontravam vendas no SQLite (Histórico/Lucro vazios). Testes:
 O PDV Windows tem área do dono (Painel, Histórico com cancelamento, Lucro, Estoque, Caixas). Cada aba só aparece
 se a empresa contratou o módulo e o usuário tem a permissão — e o servidor revalida tudo. Capturas das telas
 podem ser geradas com `Comercial.Desktop.exe --snapshot <pasta>` (dados de exemplo, sem servidor).
+
+Etapa 5 (18/10/2026) — módulos de negócio, todos com telas no PDV Windows e testes de API (`BusinessModuleTests`, 15 testes):
+- **Fornecedores e Compras:** pedido de compra (rascunho → aprovado → recebido parcial/total ou cancelado), recebimento
+  com divergências, excesso só com confirmação explícita, custo médio ponderado, sugestão de compra por estoque mínimo e
+  conta a pagar gerada automaticamente quando o módulo Contas está ativo.
+- **Financeiro:** contas a pagar/receber com parcelas e recorrência, baixa, estorno de baixa, cancelamento, despesas e
+  resumo; o Lucro passa a mostrar devoluções, receita líquida, despesas e **resultado líquido**.
+- **CRM e Fidelidade:** clientes com CPF/CNPJ validado, histórico, exportação e anonimização (LGPD); pontos por venda,
+  resgate como desconto no PDV (saldo revalidado dentro da transação), validade FIFO, estorno em cancelamento/devolução.
+- **Trocas e devoluções:** devolução parcial com reembolso proporcional, saída do caixa, retorno ao estoque e estorno de pontos;
+  venda com devolução não pode ser cancelada.
+- **Pendências de sincronização:** venda rejeitada pode ser reenviada com o preço atual ou descartada (auditado).
+- **Relatórios:** CSV de vendas, estoque e lucratividade (separador ";", proteção contra injeção de fórmula, auditado).
+- **Avisos:** estoque baixo (1 aviso por produto a cada 24 h) e quebra de caixa.
+- Desenvolvimento passa a usar **PostgreSQL** (`comercial_dev`, com RLS) por padrão: mudanças de schema não apagam mais a demo.
+  Corrigido: estouro no conversor de datas do SQLite.
 
 Dependências (exemplos): PDV → Produtos, Estoque, Caixa · Estoque → Produtos · Fiscal → PDV · Fidelidade → CRM, PDV ·
 Compras → Fornecedores, Produtos, Estoque. Desativar módulo com dependente habilitado ou com pendência (caixa aberto,

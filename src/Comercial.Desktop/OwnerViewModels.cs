@@ -48,6 +48,22 @@ public abstract class OwnerPage : ObservableObject
 
     protected static string Q(DateTimeOffset d) => Uri.EscapeDataString(d.ToString("O"));
 
+    /// <summary>Exportação CSV (módulo Relatórios premium): o servidor gera o arquivo e registra na auditoria.</summary>
+    public bool CanExport => S.Session.Can("reports.export", "relatorios_premium");
+
+    protected async Task ExportCsvAsync(string path, string name)
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog { FileName = $"{name}-{DateTime.Now:yyyyMMdd-HHmm}.csv", Filter = "Planilha CSV (*.csv)|*.csv" };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            var bytes = await S.Api.GetBytesAsync(path) ?? [];
+            await System.IO.File.WriteAllBytesAsync(dlg.FileName, bytes);
+        }
+        catch (ApiException ex) { Error = "Não foi possível exportar: " + ex.Code; }
+        catch (HttpRequestException) { Error = "Exportar exige conexão com o servidor."; }
+    }
+
     public async Task LoadAsync()
     {
         Loading = true; Error = "";
@@ -137,15 +153,67 @@ public sealed record SaleRow(Guid Id, string When, string Operator, string Items
     }
 }
 
-public sealed record DetailLine(string Name, string Quantity, string Unit, string Total);
+public sealed record DetailLine(string Name, string Quantity, string Unit, string Total, Guid ItemId = default, decimal Qty = 0, long UnitCents = 0, long TotalCents = 0);
 
 public sealed class HistoryViewModel : OwnerPage
 {
     private SaleRow? _selected;
     private string _detailTitle = "", _detailInfo = "", _summary = "";
+    private JsonElement? _detailSale;
     public HistoryViewModel(ShellViewModel shell) : base(shell, "Histórico de vendas", "Todas as vendas recebidas pelo servidor, inclusive as feitas offline")
     {
         CancelSaleCommand = RelayCommand.Sync(_ => AskCancel(), _ => Selected is { Cancelled: false } && S.Session.Can("sales.cancel"));
+        ReturnCommand = RelayCommand.Sync(_ => ReturnForm(), _ => Selected is { Cancelled: false } && S.Session.Can("sales.return", "trocas"));
+        ReprintCommand = RelayCommand.Sync(_ => Reprint(), _ => Selected is not null && Detail.Count > 0);
+        ExportCommand = new RelayCommand(_ => { var (f, t) = Range(); return ExportCsvAsync($"/api/v1/reports/export/sales.csv?from={Q(f)}&to={Q(t)}", "vendas"); });
+    }
+    public RelayCommand ReturnCommand { get; }
+    public RelayCommand ReprintCommand { get; }
+    public RelayCommand ExportCommand { get; }
+    public bool CanReturn => S.Session.Can("sales.return", "trocas");
+
+    private void Reprint()
+    {
+        var s = _detailSale!.Value;
+        var paid = s.GetProperty("payments").EnumerateArray().Sum(p => p.GetProperty("amountCents").GetInt64());
+        ReceiptPrinter.Print(new Receipt(Selected!.When is { } w && DateTime.TryParseExact(w, "dd/MM HH:mm", AppServices.PtBr, System.Globalization.DateTimeStyles.None, out var d) ? d : DateTime.Now,
+            Detail.Select(l => new ReceiptLine(l.Name, l.Qty, l.UnitCents, l.TotalCents)).ToList(), s.GetProperty("totalCents").GetInt64(),
+            s.GetProperty("discountCents").GetInt64(), paid, Selected.Payment, Reference: "2ª via"));
+    }
+
+    /// <summary>Devolução parcial/total: uma linha de quantidade por item, retorno ao estoque e forma de reembolso.</summary>
+    private void ReturnForm()
+    {
+        var row = Selected!;
+        var f = new FormViewModel { Title = "Devolução de itens", Message = $"Venda de {row.When} • {row.Total}. Informe só as quantidades devolvidas.", ConfirmText = "Registrar devolução" };
+        foreach (var l in Detail) f.Fields.Add(new FormField("item:" + l.ItemId, $"{l.Name} (vendido: {l.Quantity})", "", Icons.Box, "0"));
+        f.Fields.Add(new FormField("restock", "O produto volta para o estoque?", "Sim, está em condição de venda", options: ["Sim, está em condição de venda", "Não (avariado/defeito)"]));
+        f.Fields.Add(new FormField("refund", "Reembolso", "Dinheiro do caixa", options: ["Dinheiro do caixa", "Mesma forma do pagamento", "Crédito na loja"]));
+        f.Fields.Add(new FormField("reason", "Motivo", "", Icons.Edit));
+        Shell.ShowForm(f, async form =>
+        {
+            var items = new List<object>();
+            foreach (var fl in form.Fields.Where(x => x.Key.StartsWith("item:") && x.Value.Trim().Length > 0))
+            {
+                if (!decimal.TryParse(fl.Value, System.Globalization.NumberStyles.Number, AppServices.PtBr, out var q) || q < 0) { form.Error = "Quantidade inválida."; return false; }
+                if (q > 0) items.Add(new { saleItemId = Guid.Parse(fl.Key[5..]), quantity = q });
+            }
+            if (items.Count == 0) { form.Error = "Informe a quantidade de ao menos um item."; return false; }
+            if (form["reason"].Length < 5) { form.Error = "Informe o motivo."; return false; }
+            var refund = form["refund"] switch { "Dinheiro do caixa" => "cash", "Crédito na loja" => "store_credit", _ => "original" };
+            try
+            {
+                var r = await S.Api.PostAsync($"/api/v1/sales/{row.Id}/returns", new { items, reason = form["reason"], restock = form["restock"].StartsWith("Sim"), refundMethod = refund });
+                Shell.Pos.Status = $"Devolução registrada: devolver {AppServices.Money(r.GetProperty("refundCents").GetInt64())} ao cliente.";
+            }
+            catch (ApiException ex) when (ex.Code is "invalid_quantity" or "no_open_cash")
+            {
+                form.Error = ex.Code == "no_open_cash" ? "Abra o seu caixa para devolver em dinheiro." : "Quantidade maior que a disponível para devolução.";
+                return false;
+            }
+            await LoadAsync();
+            return true;
+        });
     }
     public override bool HasPeriod => true;
     public ObservableCollection<SaleRow> Sales { get; } = [];
@@ -191,15 +259,19 @@ public sealed class HistoryViewModel : OwnerPage
     public void ApplyDetail(SaleRow row, JsonElement s)
     {
         Detail.Clear();
+        _detailSale = s;
         foreach (var i in s.GetProperty("items").EnumerateArray())
             Detail.Add(new DetailLine(i.GetProperty("productName").GetString()!, i.GetProperty("quantity").GetDecimal().ToString("0.###", AppServices.PtBr),
-                AppServices.Money(i.GetProperty("unitPriceCents").GetInt64()), AppServices.Money(i.GetProperty("totalCents").GetInt64())));
+                AppServices.Money(i.GetProperty("unitPriceCents").GetInt64()), AppServices.Money(i.GetProperty("totalCents").GetInt64()),
+                i.TryGetProperty("id", out var iid) ? iid.GetGuid() : Guid.Empty, i.GetProperty("quantity").GetDecimal(),
+                i.GetProperty("unitPriceCents").GetInt64(), i.GetProperty("totalCents").GetInt64()));
         DetailTitle = $"Venda de {row.When} • {row.Total}";
         var disc = s.GetProperty("discountCents").GetInt64();
         var change = s.GetProperty("changeCents").GetInt64();
         DetailInfo = $"Operador: {row.Operator} • Pagamento: {row.Payment}" + (disc > 0 ? $" • Desconto: {AppServices.Money(disc)}" : "")
             + (change > 0 ? $" • Troco: {AppServices.Money(change)}" : "") + (row.Offline ? " • registrada offline" : "")
-            + (row.Cancelled ? $" • CANCELADA: {s.GetProperty("cancelReason").GetString()}" : "");
+            + (row.Cancelled ? $" • CANCELADA: {s.GetProperty("cancelReason").GetString()}" : "")
+            + (s.TryGetProperty("returnedCents", out var ret) && ret.GetInt64() > 0 ? $" • DEVOLVIDO: {AppServices.Money(ret.GetInt64())}" : "");
     }
 
     private void AskCancel()
@@ -245,6 +317,7 @@ public sealed class ProfitViewModel(ShellViewModel shell) : OwnerPage(shell, "Lu
     public string Note { get => _note; set => Set(ref _note, value); }
     public string DiscountNote { get => _discountNote; set => Set(ref _discountNote, value); }
     public bool HasBars => Bars.Count > 1;
+    public RelayCommand ExportCommand => new(_ => { var (f, t) = Range(); return ExportCsvAsync($"/api/v1/reports/export/profitability.csv?from={Q(f)}&to={Q(t)}", "lucratividade"); });
 
     protected override async Task LoadCoreAsync()
     {
@@ -260,6 +333,10 @@ public sealed class ProfitViewModel(ShellViewModel shell) : OwnerPage(shell, "Lu
         Kpis.Add(new Kpi("Custo dos produtos", AppServices.Money(t.GetProperty("costCents").GetInt64()), "custo histórico", "\uE7B8", "neutral"));
         Kpis.Add(new Kpi("Lucro bruto", AppServices.Money(t.GetProperty("grossProfitCents").GetInt64()), "estimado (sem despesas)", "\uE8C7", "primary"));
         Kpis.Add(new Kpi("Margem bruta", t.GetProperty("marginPercent").GetDecimal().ToString("0.0", AppServices.PtBr) + "%", "sobre o faturamento", "\uE9D2", "primary"));
+        if (t.TryGetProperty("netResultCents", out var net) && net.ValueKind == JsonValueKind.Number)
+            Kpis.Add(new Kpi("Resultado l\u00EDquido", AppServices.Money(net.GetInt64()), $"ap\u00F3s despesas de {AppServices.Money(t.GetProperty("expensesCents").GetInt64())}", Icons.Money, net.GetInt64() >= 0 ? "primary" : "warn"));
+        if (t.TryGetProperty("returnsCents", out var rets) && rets.GetInt64() > 0)
+            Kpis[0] = Kpis[0] with { Sub = $"{t.GetProperty("salesCount").GetInt32()} venda(s) \u2022 devolu\u00E7\u00F5es {AppServices.Money(rets.GetInt64())}" };
         var disc = t.GetProperty("saleLevelDiscountCents").GetInt64();
         DiscountNote = disc > 0 ? $"Descontos no total das vendas (não atribuídos a produtos): {AppServices.Money(disc)}" : "";
         Products.Clear();
@@ -320,6 +397,7 @@ public sealed class StockViewModel : OwnerPage
         StartInventoryCommand = RelayCommand.Sync(_ => { foreach (var r in _all) r.Counted = ""; InventoryMode = true; }, _ => S.Session.Can("stock.adjust"));
         CancelInventoryCommand = RelayCommand.Sync(_ => InventoryMode = false);
         SaveInventoryCommand = RelayCommand.Sync(_ => SaveInventory());
+        ExportCommand = new RelayCommand(_ => ExportCsvAsync($"/api/v1/reports/export/stock.csv?storeId={S.Settings.StoreId}", "estoque"));
     }
     public ObservableCollection<StockRow> Items { get; } = [];
     public string Filter { get => _filter; set { if (Set(ref _filter, value)) Apply(); } }
@@ -334,6 +412,7 @@ public sealed class StockViewModel : OwnerPage
     public RelayCommand StartInventoryCommand { get; }
     public RelayCommand CancelInventoryCommand { get; }
     public RelayCommand SaveInventoryCommand { get; }
+    public RelayCommand ExportCommand { get; }
 
     protected override async Task LoadCoreAsync()
     {

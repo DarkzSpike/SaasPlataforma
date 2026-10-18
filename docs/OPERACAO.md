@@ -3,7 +3,7 @@
 ## Ambientes
 | Ambiente | Banco | Chaves | Observação |
 |---|---|---|---|
-| Development | SQLite (`dev-data/`) | efêmeras (geradas em memória, aviso no log) | nunca exposto à internet |
+| Development | PostgreSQL local `comercial_dev` com RLS (`dev/run-api.ps1`); SQLite com `-Sqlite` | efêmeras (geradas em memória, aviso no log) | nunca exposto à internet |
 | Testing (testes automatizados) | SQLite temporário por classe de teste | fixas de teste | — |
 | Homologação | PostgreSQL + RLS (`deploy/postgres`) | cofre de segredos, distintas da produção | dados fictícios; homologação SEFAZ |
 | Produção | PostgreSQL gerenciado, réplica, PITR | cofre de segredos, rotação | só após checklist abaixo |
@@ -38,6 +38,7 @@ dotnet test tests/Comercial.Tests
 ```
 Cada classe de teste cria um banco `ct_*` descartável, aplica a migração e o RLS como superusuário e roda a API como
 `app_comercial`; os bancos são apagados ao final. Sem a variável, a suíte roda em SQLite.
+Atalho que já define as duas variáveis: `powershell -File dev/test-pg.ps1`.
 Para o caminho completo de deploy/backup/restauração: `powershell -File dev/pg-e2e.ps1`.
 A senha local do superusuário está em `dev/dev-secrets.local.json` (ignorado pelo git).
 
@@ -60,7 +61,7 @@ As fotos **não** ficam públicas: o PDV e o app leem pela API, que confere a em
 quebra as fotos antigas (a chave guarda o provedor). Status: **não testado contra o Google Drive real**.
 
 ## Checklist antes de produção (bloqueante)
-- [x] Suíte de testes rodando contra PostgreSQL com RLS ativo (local: 79/79; job `postgres-integration` do CI configurado, ainda não executado no GitHub).
+- [x] Suíte de testes rodando contra PostgreSQL com RLS ativo (local: 103 aprovados, 1 ignorado; job `postgres-integration` do CI configurado, ainda não executado no GitHub).
 - [ ] Restauração de backup PostgreSQL cronometrada **no ambiente de homologação, com volume realista** (RTO real). Localmente já foi validada.
 - [ ] Provedor fiscal homologado integrado e testado na SEFAZ de homologação de cada UF atendida.
 - [ ] Provedor de pagamento real com adaptador de assinatura próprio e testes de webhook.

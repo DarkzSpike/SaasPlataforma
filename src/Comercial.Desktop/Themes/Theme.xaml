@@ -73,6 +73,42 @@
         <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
     </Style>
 
+    <!-- Barras de rolagem finas no tema escuro (substituem as claras do Windows) -->
+    <ControlTemplate x:Key="ThinThumb" TargetType="Thumb">
+        <Border CornerRadius="4" Background="{DynamicResource Surface3Brush}" Margin="2"/>
+    </ControlTemplate>
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="10"/>
+        <Setter Property="MinWidth" Value="10"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Track x:Name="PART_Track" IsDirectionReversed="True">
+                        <Track.Thumb><Thumb Template="{StaticResource ThinThumb}"/></Track.Thumb>
+                    </Track>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto"/>
+                <Setter Property="MinWidth" Value="0"/>
+                <Setter Property="Height" Value="10"/>
+                <Setter Property="MinHeight" Value="10"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Track x:Name="PART_Track" IsDirectionReversed="False">
+                                <Track.Thumb><Thumb Template="{StaticResource ThinThumb}"/></Track.Thumb>
+                            </Track>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- ===== Botões ===== -->
     <Style x:Key="BaseButton" TargetType="Button">
         <Setter Property="Foreground" Value="White"/>

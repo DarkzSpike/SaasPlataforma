@@ -157,7 +157,45 @@
                     </Grid>
                 </Border>
 
-                <TextBlock Text="Forma de pagamento" Style="{StaticResource SectionTitle}" Margin="0,22,0,10"/>
+                <!-- Cliente (CRM) e pontos de fidelidade -->
+                <StackPanel Margin="0,18,0,0" Visibility="{Binding CanUseCustomers, Converter={StaticResource Vis}}">
+                    <TextBlock Text="Cliente (opcional)" Style="{StaticResource SectionTitle}" Margin="0,0,0,10"/>
+                    <Grid Visibility="{Binding NoCustomer, Converter={StaticResource Vis}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE716;" local:Ui.Placeholder="Nome, CPF ou telefone" Text="{Binding CustomerQuery, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Buscar cliente">
+                            <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SearchCustomerCommand}"/></TextBox.InputBindings>
+                        </TextBox>
+                        <Button Grid.Column="1" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE721;" Width="50" Padding="0" Margin="8,0,0,0" Command="{Binding SearchCustomerCommand}" ToolTip="Buscar cliente" AutomationProperties.Name="Buscar cliente"/>
+                    </Grid>
+                    <ListBox ItemsSource="{Binding CustomerHits}" SelectedItem="{Binding SelectedCustomerHit}" Background="{DynamicResource Surface2Brush}" BorderThickness="0" Margin="0,6,0,0"
+                             Visibility="{Binding CustomerHits.Count, Converter={StaticResource Vis}}" AutomationProperties.Name="Clientes encontrados">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="4,3">
+                                    <TextBlock Text="{Binding Name}" Foreground="White"/>
+                                    <TextBlock Text="{Binding Info}" Style="{StaticResource Muted}" FontSize="12"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <Border Background="{DynamicResource Surface2Brush}" CornerRadius="8" Padding="14,8" Visibility="{Binding HasCustomer, Converter={StaticResource Vis}}">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" local:Ui.Icon="&#xE711;" Height="30" Padding="6,0" Command="{Binding ClearCustomerCommand}" ToolTip="Remover cliente" AutomationProperties.Name="Remover cliente"/>
+                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE716;" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
+                            <TextBlock Text="{Binding CustomerText}" Foreground="White" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </Border>
+                    <StackPanel Visibility="{Binding CanRedeem, Converter={StaticResource Vis}}" Margin="0,8,0,0">
+                        <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE734;" local:Ui.Placeholder="Pontos a usar nesta compra" Text="{Binding Redeem, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Pontos a usar"/>
+                        <TextBlock Text="{Binding RedeemHint}" Style="{StaticResource Muted}" FontSize="12" Margin="2,4,0,0"/>
+                        <TextBlock Text="{Binding LoyaltyText}" Foreground="{DynamicResource WarnBrush}" Margin="2,2,0,0" Visibility="{Binding LoyaltyText, Converter={StaticResource Vis}}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock Text="Forma de pagamento" Style="{StaticResource SectionTitle}" Margin="0,18,0,10"/>
                 <ComboBox Style="{StaticResource DarkCombo}" local:Ui.Icon="&#xE8C7;" ItemsSource="{Binding PaymentOptions}" SelectedItem="{Binding Method}" AutomationProperties.Name="Forma de pagamento">
                     <ComboBox.ItemTemplate>
                         <DataTemplate><TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" FontSize="15"/></DataTemplate>

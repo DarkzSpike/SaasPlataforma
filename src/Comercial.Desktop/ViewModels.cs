@@ -82,14 +82,26 @@ public sealed class LoginViewModel : ObservableObject
         try
         {
             Status = "Conectando...";
-            if (s.Settings.DeviceId is null)
+            // Outra empresa neste computador: o terminal salvo não vale para ela.
+            if (!string.Equals(s.Settings.TenantCode, TenantCode.Trim(), StringComparison.OrdinalIgnoreCase))
             {
-                // Primeira execução: ativa este terminal (exige usuário com permissão devices.manage).
-                await s.Api.LoginAsync(TenantCode.Trim(), Email.Trim(), password, null);
-                var device = await s.Api.PostAsync("/api/v1/devices", new { name = Environment.MachineName, platform = "windows" });
-                s.Settings.DeviceId = device.GetProperty("id").GetGuid();
+                s.Settings.DeviceId = null;
+                s.Settings.StoreId = null;
             }
-            await s.Api.LoginAsync(TenantCode.Trim(), Email.Trim(), password, s.Settings.DeviceId);
+            if (s.Settings.DeviceId is null) await ActivateDeviceAsync(s, password);
+            try
+            {
+                await s.Api.LoginAsync(TenantCode.Trim(), Email.Trim(), password, s.Settings.DeviceId);
+            }
+            catch (ApiException ex) when (ex.Code == "device_not_active")
+            {
+                // Terminal salvo foi desativado (ou não existe mais). Um dono/gerente pode cadastrar este
+                // computador como um NOVO terminal; o antigo continua revogado. Operador comum recebe permission_denied.
+                s.Settings.DeviceId = null;
+                s.Settings.StoreId = null;
+                await ActivateDeviceAsync(s, password);
+                await s.Api.LoginAsync(TenantCode.Trim(), Email.Trim(), password, s.Settings.DeviceId);
+            }
             s.Settings.TenantCode = TenantCode.Trim();
             var stores = await s.Api.GetAsync("/api/v1/stores");
             s.Settings.StoreId ??= stores[0].GetProperty("id").GetGuid();
@@ -110,7 +122,7 @@ public sealed class LoginViewModel : ObservableObject
                 "invalid_credentials" => "Usuário ou senha inválidos.",
                 "account_locked" => "Conta bloqueada temporariamente.",
                 "device_not_active" => "Este terminal foi desativado. Contate o responsável.",
-                "permission_denied" => "Ative o terminal com um usuário gerente ou proprietário.",
+                "permission_denied" => "Este computador ainda não é um terminal ativo. Entre uma vez com o dono ou um gerente para ativá-lo.",
                 "device_limit" => "Limite de terminais do plano atingido.",
                 _ => "Falha: " + ex.Code,
             };
@@ -120,6 +132,17 @@ public sealed class LoginViewModel : ObservableObject
             Status = "Sem conexão com o servidor. O primeiro acesso precisa de internet.";
         }
         finally { Busy = false; }
+    }
+
+    /// <summary>Cadastra este computador como terminal da empresa (exige permissão devices.manage no servidor).</summary>
+    private async Task ActivateDeviceAsync(AppServices s, string password)
+    {
+        Status = "Ativando este computador como terminal...";
+        await s.Api.LoginAsync(TenantCode.Trim(), Email.Trim(), password, null);
+        var device = await s.Api.PostAsync("/api/v1/devices", new { name = Environment.MachineName, platform = "windows" });
+        s.Settings.DeviceId = device.GetProperty("id").GetGuid();
+        s.Settings.TenantCode = TenantCode.Trim();
+        s.Settings.Save();
     }
 
     public static async Task RefreshOnlineDataAsync(AppServices s)
@@ -162,8 +185,8 @@ public sealed class ShellViewModel : ObservableObject
     public SaleDoneViewModel? SaleDone { get => _saleDone; set => Set(ref _saleDone, value); }
     public FormViewModel? Form { get => _form; set => Set(ref _form, value); }
 
-    public void ShowSaleDone(long total, long paid, string method) =>
-        SaleDone = new SaleDoneViewModel(total, paid, method, () => SaleDone = null);
+    public void ShowSaleDone(long total, long paid, string method, Receipt? receipt = null) =>
+        SaleDone = new SaleDoneViewModel(total, paid, method, () => SaleDone = null, receipt);
 
     public void ShowForm(FormViewModel f, Func<FormViewModel, Task<bool>> onConfirm)
     {
@@ -197,7 +220,12 @@ public sealed class ShellViewModel : ObservableObject
         if (sess.Can("sales.read")) Nav.Add(new NavItem("history", "Histórico", "\uE81C"));
         if (sess.Can("reports.financial", "lucratividade")) Nav.Add(new NavItem("profit", "Lucro", "\uE8C7"));
         if (sess.Can("stock.read", "estoque")) Nav.Add(new NavItem("stock", "Estoque", "\uE7B8"));
+        if (sess.Can("purchases.manage", "compras") || sess.Can("suppliers.manage", "fornecedores")) Nav.Add(new NavItem("purchases", "Compras", "\uE7BF"));
+        if (sess.Can("customers.read", "crm")) Nav.Add(new NavItem("customers", "Clientes", "\uE716"));
+        if (sess.Can("finance.read", "contas") || sess.Can("finance.read", "financeiro")) Nav.Add(new NavItem("finance", "Financeiro", "\uE8C7"));
         if (sess.Can("cash.review", "caixa")) Nav.Add(new NavItem("cash", "Caixas", "\uE787"));
+        if (sess.Can("sync.reconcile")) Nav.Add(new NavItem("pending", "Pend\u00EAncias", "\uE7BA"));
+        if (sess.Can("reports.financial")) Nav.Add(new NavItem("alerts", "Avisos", "\uEA8F"));
         _selected = Nav[0];
         _page = Pos;
         LogoutCommand = RelayCommand.Sync(_ => { Pos.Stop(); _main.Current = new LoginViewModel(_main); });
@@ -213,6 +241,11 @@ public sealed class ShellViewModel : ObservableObject
             "profit" => Load(new ProfitViewModel(this)),
             "stock" => Load(new StockViewModel(this)),
             "cash" => Load(new CashHistoryViewModel(this)),
+            "purchases" => Load(new PurchasesViewModel(this)),
+            "customers" => Load(new CustomersViewModel(this)),
+            "finance" => Load(new FinanceViewModel(this)),
+            "pending" => Load(new PendingViewModel(this)),
+            "alerts" => Load(new AlertsViewModel(this)),
             _ => Pos,
         };
     }
@@ -268,6 +301,7 @@ public sealed record ProductHit(Guid Id, string Name, string Code, long PriceCen
 }
 
 public sealed record PaymentOption(int Method, string Name, string Glyph);
+public sealed record CustomerHit(Guid Id, string Name, string Info);
 
 public sealed class PosViewModel : ObservableObject
 {
@@ -289,7 +323,80 @@ public sealed class PosViewModel : ObservableObject
     public ProductHit? SelectedHit { get => _selectedHit; set { if (Set(ref _selectedHit, value) && value is not null) AddProduct(value); } }
     public bool HasSuggestions => Suggestions.Count > 0;
     public bool CartEmpty => Cart.Count == 0;
-    public string TotalText => AppServices.Money(Cart.Sum(c => c.Line.TotalCents));
+    public string TotalText => AppServices.Money(TotalCents);
+    private long CartCents => Cart.Sum(c => c.Line.TotalCents);
+    private long TotalCents => Math.Max(0, CartCents - LoyaltyDiscountCents);
+
+    // ---- Cliente (CRM) e pontos (fidelidade) ----
+    private CustomerHit? _customer, _customerHitSel;
+    private string _customerQuery = "", _redeem = "";
+    private int _pointsAvailable, _centsPerPoint, _minRedeem, _maxRedeemPct;
+    public bool CanUseCustomers => S.Session.Can("customers.read", "crm");
+    public ObservableCollection<CustomerHit> CustomerHits { get; } = [];
+    public string CustomerQuery { get => _customerQuery; set => Set(ref _customerQuery, value); }
+    public CustomerHit? SelectedCustomerHit { get => _customerHitSel; set { if (Set(ref _customerHitSel, value) && value is not null) _ = SelectCustomerAsync(value); } }
+    public bool HasCustomer => _customer is not null;
+    public bool NoCustomer => _customer is null;
+    public string CustomerText => _customer is null ? "" : _customer.Name + (_centsPerPoint > 0 ? $"  •  {_pointsAvailable} ponto(s)" : "");
+    public bool CanRedeem => _customer is not null && _centsPerPoint > 0 && _pointsAvailable >= _minRedeem && _pointsAvailable > 0;
+    public string RedeemHint => CanRedeem ? $"1 ponto = {AppServices.Money(_centsPerPoint)} • mínimo {_minRedeem} • até {_maxRedeemPct}% da compra" : "";
+    public string Redeem { get => _redeem; set { if (Set(ref _redeem, value)) RaiseTotals(); } }
+    private int RedeemPoints => int.TryParse(Redeem, out var p) && p > 0 ? p : 0;
+    private long LoyaltyDiscountCents => CanRedeem ? (long)RedeemPoints * _centsPerPoint : 0;
+    public string LoyaltyText => LoyaltyDiscountCents > 0 ? $"Pontos: -{AppServices.Money(LoyaltyDiscountCents)}" : "";
+    public RelayCommand SearchCustomerCommand { get; private set; } = null!;
+    public RelayCommand ClearCustomerCommand { get; private set; } = null!;
+
+    private void RaiseTotals() { Raise(nameof(TotalText)); Raise(nameof(LoyaltyText)); }
+
+    private void RaiseCustomer()
+    {
+        Raise(nameof(HasCustomer)); Raise(nameof(NoCustomer)); Raise(nameof(CustomerText)); Raise(nameof(CanRedeem)); Raise(nameof(RedeemHint)); RaiseTotals();
+    }
+
+    private async Task SearchCustomersAsync()
+    {
+        CustomerHits.Clear();
+        if (CustomerQuery.Trim().Length < 2) { Status = "Digite ao menos 2 letras, CPF ou telefone do cliente."; return; }
+        try
+        {
+            foreach (var c in (await S.Api.GetAsync($"/api/v1/customers?q={Uri.EscapeDataString(CustomerQuery.Trim())}")).EnumerateArray().Take(8))
+                CustomerHits.Add(new CustomerHit(c.GetProperty("id").GetGuid(), c.GetProperty("name").GetString()!,
+                    (c.TryGetProperty("document", out var d) && d.ValueKind == JsonValueKind.String ? "CPF " + d.GetString() : "")
+                    + (c.TryGetProperty("phone", out var ph) && ph.ValueKind == JsonValueKind.String ? "  " + ph.GetString() : "")));
+            if (CustomerHits.Count == 0) Status = "Nenhum cliente encontrado. Cadastre na área Clientes.";
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException) { Status = "Busca de clientes precisa de conexão."; }
+    }
+
+    private async Task SelectCustomerAsync(CustomerHit c)
+    {
+        _customer = c; _pointsAvailable = 0; _centsPerPoint = 0; Redeem = "";
+        CustomerHits.Clear(); CustomerQuery = "";
+        if (S.Session.Modules.Contains("fidelidade"))
+            try
+            {
+                var program = await S.Api.GetAsync("/api/v1/loyalty/program");
+                var detail = await S.Api.GetAsync($"/api/v1/customers/{c.Id}");
+                if (program.GetProperty("enabled").GetBoolean() && detail.GetProperty("loyalty").ValueKind == JsonValueKind.Object)
+                {
+                    _centsPerPoint = program.GetProperty("centsPerPoint").GetInt32();
+                    _minRedeem = program.GetProperty("minPointsToRedeem").GetInt32();
+                    _maxRedeemPct = program.GetProperty("maxRedeemPercent").GetInt32();
+                    _pointsAvailable = detail.GetProperty("loyalty").GetProperty("available").GetInt32();
+                }
+            }
+            catch (Exception ex) when (ex is ApiException or HttpRequestException) { /* sem pontos offline */ }
+        RaiseCustomer();
+    }
+
+    private void ClearCustomer() { _customer = null; Redeem = ""; _pointsAvailable = 0; _centsPerPoint = 0; RaiseCustomer(); }
+
+    public void SetCustomerForPreview(string name, int points)
+    {
+        _customer = new CustomerHit(Guid.NewGuid(), name, ""); _pointsAvailable = points; _centsPerPoint = 5; _minRedeem = 100; _maxRedeemPct = 50;
+        RaiseCustomer();
+    }
     public string ItemsText => Cart.Count == 0 ? "" : $"{Cart.Count} item(ns)";
     public bool CashOpen => _cashSession is not null;
     public string CashText => CashOpen ? "Caixa aberto" : "Caixa fechado";
@@ -311,7 +418,9 @@ public sealed class PosViewModel : ObservableObject
     {
         _shell = shell;
         _method = PaymentOptions[0];
-        Cart.CollectionChanged += (_, _) => { Raise(nameof(TotalText)); Raise(nameof(CartEmpty)); Raise(nameof(ItemsText)); };
+        Cart.CollectionChanged += (_, _) => { RaiseTotals(); Raise(nameof(CartEmpty)); Raise(nameof(ItemsText)); };
+        SearchCustomerCommand = new RelayCommand(_ => SearchCustomersAsync());
+        ClearCustomerCommand = RelayCommand.Sync(_ => ClearCustomer());
         AddCommand = RelayCommand.Sync(_ => Add());
         ClearCommand = RelayCommand.Sync(_ => Cart.Clear(), _ => Cart.Count > 0);
         RemoveCommand = RelayCommand.Sync(p => { if (p is CartItemVm i) Cart.Remove(i); });
@@ -378,17 +487,28 @@ public sealed class PosViewModel : ObservableObject
 
     private void Finish()
     {
-        var total = Cart.Sum(c => c.Line.TotalCents);
+        if (RedeemPoints > 0)
+        {
+            if (RedeemPoints > _pointsAvailable) { Status = $"O cliente tem só {_pointsAvailable} ponto(s)."; return; }
+            if (RedeemPoints < _minRedeem) { Status = $"Resgate mínimo de {_minRedeem} pontos."; return; }
+            if (LoyaltyDiscountCents > CartCents * _maxRedeemPct / 100) { Status = $"Pontos pagam no máximo {_maxRedeemPct}% da compra."; return; }
+        }
+        var total = TotalCents;
         if (!PromptViewModel.TryMoney(Paid, out var paid)) { Status = "Valor recebido inválido."; return; }
         if (paid == 0) paid = total;
         if (paid < total) { Status = "Valor recebido menor que o total."; return; }
         if (Method.Method != 1 && paid > total) { Status = "Cartão e PIX não geram troco: informe o valor exato."; return; }
         try
         {
-            S.Pos!.RecordSale(S.Settings.StoreId!.Value, _cashSession!.Value, Cart.Select(c => c.Line).ToList(), [new SalePaymentRequest(Method.Method, paid)]);
+            var lines = Cart.Select(c => c.Line).ToList();
+            S.Pos!.RecordSale(S.Settings.StoreId!.Value, _cashSession!.Value, lines, [new SalePaymentRequest(Method.Method, paid)], 0,
+                _customer?.Id, CanRedeem ? RedeemPoints : 0);
+            var receipt = new Receipt(DateTime.Now, lines.Select(l => new ReceiptLine(l.Name, l.Quantity, l.UnitPriceCents, l.TotalCents)).ToList(),
+                total, LoyaltyDiscountCents, paid, Method.Name, _customer?.Name);
             Status = "";
             Cart.Clear(); Paid = "";
-            _shell.ShowSaleDone(total, paid, Method.Name); // só fecha quando o operador confirmar o troco
+            ClearCustomer();
+            _shell.ShowSaleDone(total, paid, Method.Name, receipt); // só fecha quando o operador confirmar o troco
             _ = SyncNowAsync();
         }
         catch (InvalidOperationException ex) { Status = ex.Message; }

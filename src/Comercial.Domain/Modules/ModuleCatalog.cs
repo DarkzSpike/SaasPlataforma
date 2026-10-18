@@ -103,17 +103,17 @@ public static class ModuleCatalogSeed
             M(ModuleKeys.Cash, "Caixa financeiro", "A - Operação essencial", R, "Abertura, suprimento, sangria, fechamento e diferenças."),
             M(ModuleKeys.Fiscal, "Fiscal brasileiro", "A - Operação essencial", B, "Registro de documentos fiscais e estados. Transmissão SEFAZ depende de provedor homologado (não incluído).", ModuleKeys.Pdv),
             // B — Compras
-            M(ModuleKeys.Suppliers, "Fornecedores", "B - Compras", P, "Cadastro e histórico de fornecedores."),
-            M(ModuleKeys.Purchases, "Compras avançadas", "B - Compras", P, "Pedidos, aprovação e recebimento.", ModuleKeys.Suppliers, ModuleKeys.Products, ModuleKeys.Stock),
+            M(ModuleKeys.Suppliers, "Fornecedores", "B - Compras", B, "Cadastro, contatos, prazo de entrega e histórico de pedidos."),
+            M(ModuleKeys.Purchases, "Compras avançadas", "B - Compras", B, "Pedidos numerados, aprovação, recebimento parcial com divergências, custo médio e sugestão de reposição.", ModuleKeys.Suppliers, ModuleKeys.Products, ModuleKeys.Stock),
             M(ModuleKeys.PurchaseImport, "Importação de documentos de compra", "B - Compras", P, "Importação de XML de NF-e de entrada.", ModuleKeys.Purchases),
             // C — Financeiro
-            M(ModuleKeys.Finance, "Financeiro avançado", "C - Financeiro", P, "Fluxo de caixa, conciliação, centros de custo.", ModuleKeys.Cash),
-            M(ModuleKeys.PayablesReceivables, "Contas a pagar e receber", "C - Financeiro", P, "Vencimentos, parcelas, baixas.", ModuleKeys.Finance),
-            M(ModuleKeys.Expenses, "Despesas e custos", "C - Financeiro", P, "Despesas operacionais e comprovantes.", ModuleKeys.Finance),
-            M(ModuleKeys.Profitability, "Lucratividade", "C - Financeiro", B, "Lucro bruto e margem por produto e por dia, com custo histórico de cada venda (sem despesas).", ModuleKeys.Pdv),
+            M(ModuleKeys.Finance, "Financeiro avançado", "C - Financeiro", B, "Fluxo de caixa realizado e previsto, vencidos, despesas por categoria e centro de custo (conciliação bancária: planejada).", ModuleKeys.Cash),
+            M(ModuleKeys.PayablesReceivables, "Contas a pagar e receber", "C - Financeiro", B, "Vencimentos, parcelas, recorrência mensal, baixas e estornos auditados.", ModuleKeys.Finance),
+            M(ModuleKeys.Expenses, "Despesas e custos", "C - Financeiro", B, "Despesas operacionais por categoria e centro de custo; entram no resultado líquido estimado.", ModuleKeys.Finance),
+            M(ModuleKeys.Profitability, "Lucratividade", "C - Financeiro", B, "Lucro bruto e margem por produto e por dia, com custo histórico, devoluções e (com o módulo Despesas) resultado líquido estimado.", ModuleKeys.Pdv),
             // D — Clientes
-            M(ModuleKeys.Crm, "CRM", "D - Clientes", P, "Cadastro de clientes e consentimentos."),
-            M(ModuleKeys.Loyalty, "Fidelidade", "D - Clientes", P, "Pontos e resgates.", ModuleKeys.Crm, ModuleKeys.Pdv),
+            M(ModuleKeys.Crm, "CRM", "D - Clientes", B, "Clientes, histórico de compras, consentimento de marketing e LGPD (exportação e anonimização)."),
+            M(ModuleKeys.Loyalty, "Fidelidade", "D - Clientes", B, "Pontos por compra, resgate como desconto, validade, extrato e estorno em cancelamentos/devoluções.", ModuleKeys.Crm, ModuleKeys.Pdv),
             M(ModuleKeys.Coupons, "Cupons e promoções", "D - Clientes", P, "Cupons, combos, regras por período.", ModuleKeys.Pdv),
             M(ModuleKeys.Campaigns, "Campanhas", "D - Clientes", P, "Campanhas com controle de consentimento.", ModuleKeys.Crm),
             // E — Funcionários
@@ -123,7 +123,7 @@ public static class ModuleCatalogSeed
             M(ModuleKeys.Shifts, "Escalas e presença", "E - Funcionários", P, "Escalas e presença (requer análise trabalhista)."),
             M(ModuleKeys.Commissions, "Comissões", "E - Funcionários", P, "Comissões por venda.", ModuleKeys.Pdv),
             // F — Atendimento
-            M(ModuleKeys.Returns, "Trocas e devoluções", "F - Atendimento", P, "Devoluções e estornos.", ModuleKeys.Pdv),
+            M(ModuleKeys.Returns, "Trocas e devoluções", "F - Atendimento", B, "Devoluções parciais ou totais, reembolso proporcional, retorno ao estoque (nota fiscal de devolução depende do provedor fiscal).", ModuleKeys.Pdv),
             M(ModuleKeys.ServiceOrders, "Ordens de serviço", "F - Atendimento", P, "OS com peças e status.", ModuleKeys.Products),
             M(ModuleKeys.Quotes, "Orçamentos e pedidos", "F - Atendimento", P, "Orçamentos convertíveis em venda.", ModuleKeys.Pdv),
             // G — Logística
@@ -131,7 +131,7 @@ public static class ModuleCatalogSeed
             M(ModuleKeys.Ecommerce, "E-commerce", "G - Logística", P, "Integração com lojas virtuais.", ModuleKeys.Products, ModuleKeys.Stock),
             M(ModuleKeys.Picking, "Separação e expedição", "G - Logística", P, "Listas de separação.", ModuleKeys.Delivery),
             // H — Equipamentos
-            M(ModuleKeys.Peripherals, "Impressoras e periféricos", "H - Equipamentos", P, "Leitores, impressoras, gavetas.", ModuleKeys.Pdv),
+            M(ModuleKeys.Peripherals, "Impressoras e periféricos", "H - Equipamentos", B, "Leitor de código de barras (teclado) e comprovante não fiscal na impressora do Windows (gaveta e ESC/POS: planejados).", ModuleKeys.Pdv),
             M(ModuleKeys.Scales, "Balanças", "H - Equipamentos", P, "Produtos por peso.", ModuleKeys.Pdv),
             M(ModuleKeys.Labels, "Etiquetas e precificação", "H - Equipamentos", P, "Modelos e lotes de etiquetas.", ModuleKeys.Products),
             // I — Gestão avançada
@@ -146,8 +146,8 @@ public static class ModuleCatalogSeed
             M(ModuleKeys.CustomerPortal, "Portal do cliente SaaS", "J - Serviços SaaS", P, "Assinatura e solicitações."),
             M(ModuleKeys.WhiteLabel, "Identidade visual White Label", "J - Serviços SaaS", R, "Logotipos, cores, temas, publicação versionada."),
             M(ModuleKeys.CustomDomain, "Domínio personalizado", "J - Serviços SaaS", P, "Domínio próprio com verificação.", ModuleKeys.WhiteLabel),
-            M(ModuleKeys.ReportsPremium, "Relatórios e exportações premium", "J - Serviços SaaS", P, "Agendamento e modelos."),
-            M(ModuleKeys.Notifications, "Notificações inteligentes", "J - Serviços SaaS", P, "Alertas com regras de frequência."),
+            M(ModuleKeys.ReportsPremium, "Relatórios e exportações premium", "J - Serviços SaaS", B, "Exportação CSV de vendas, estoque e lucratividade, auditada (agendamento: planejado)."),
+            M(ModuleKeys.Notifications, "Notificações inteligentes", "J - Serviços SaaS", B, "Avisos de quebra de caixa e estoque baixo (no máximo 1 por produto a cada 24 h), no app e por push."),
         };
         return list;
     }

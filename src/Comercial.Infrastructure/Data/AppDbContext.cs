@@ -52,19 +52,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     public DbSet<SyncEvent> SyncEvents => Set<SyncEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<PushToken> PushTokens => Set<PushToken>();
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<PurchaseItem> PurchaseItems => Set<PurchaseItem>();
+    public DbSet<PurchaseReceipt> PurchaseReceipts => Set<PurchaseReceipt>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<LoyaltyProgram> LoyaltyPrograms => Set<LoyaltyProgram>();
+    public DbSet<LoyaltyTransaction> LoyaltyTransactions => Set<LoyaltyTransaction>();
+    public DbSet<FinancialTitle> FinancialTitles => Set<FinancialTitle>();
+    public DbSet<SaleReturn> SaleReturns => Set<SaleReturn>();
+    public DbSet<SaleReturnItem> SaleReturnItems => Set<SaleReturnItem>();
 
     /// <summary>Entidades que nunca podem ser alteradas ou excluídas depois de gravadas.</summary>
     private static readonly HashSet<Type> Immutable =
     [
         typeof(AuditLog), typeof(StockMovement), typeof(CashMovement), typeof(OperatingEvent), typeof(SaleItem),
-        typeof(SalePayment), typeof(BrandingVersion), typeof(PaymentEvent), typeof(FiscalEvent), typeof(SyncEvent)
+        typeof(SalePayment), typeof(BrandingVersion), typeof(PaymentEvent), typeof(FiscalEvent), typeof(SyncEvent),
+        typeof(LoyaltyTransaction), typeof(PurchaseReceipt), typeof(SaleReturn), typeof(SaleReturnItem)
     ];
 
     /// <summary>Entidades que podem mudar de estado, mas nunca ser excluídas.</summary>
     private static readonly HashSet<Type> NoDelete =
     [
         typeof(Sale), typeof(FiscalDocument), typeof(CashSession), typeof(Invoice), typeof(Tenant), typeof(Subscription),
-        typeof(Product), typeof(User), typeof(Device), typeof(SupportSession), typeof(StockBalance)
+        typeof(Product), typeof(User), typeof(Device), typeof(SupportSession), typeof(StockBalance),
+        typeof(Supplier), typeof(PurchaseOrder), typeof(PurchaseItem), typeof(Customer), typeof(FinancialTitle)
     ];
 
     protected override void ConfigureConventions(ModelConfigurationBuilder b)
@@ -269,6 +281,63 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
             e.Property(x => x.Token).HasMaxLength(512);
         });
         m.Entity<Product>(e => { e.Property(x => x.ImageKey).HasMaxLength(300); e.Property(x => x.ImageContentType).HasMaxLength(40); });
+
+        m.Entity<Supplier>(e =>
+        {
+            e.ToTable("suppliers");
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+            e.HasIndex(x => new { x.TenantId, x.Name });
+            e.Property(x => x.Name).HasMaxLength(200);
+        });
+        m.Entity<PurchaseOrder>(e =>
+        {
+            e.ToTable("purchase_orders");
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+            e.HasIndex(x => new { x.TenantId, x.Number }).IsUnique();
+            e.HasOne<Supplier>().WithMany().HasForeignKey(x => new { x.TenantId, x.SupplierId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Store>().WithMany().HasForeignKey(x => new { x.TenantId, x.StoreId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(i => new { i.TenantId, i.PurchaseOrderId }).HasPrincipalKey(s => new { s.TenantId, s.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<PurchaseItem>(e =>
+        {
+            e.ToTable("purchase_items");
+            e.HasOne<Product>().WithMany().HasForeignKey(x => new { x.TenantId, x.ProductId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<PurchaseReceipt>(e => { e.ToTable("purchase_receipts"); e.HasIndex(x => new { x.TenantId, x.PurchaseOrderId }); });
+        m.Entity<Customer>(e =>
+        {
+            e.ToTable("customers");
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+            e.HasIndex(x => new { x.TenantId, x.Document }).IsUnique().HasFilter("\"Document\" IS NOT NULL");
+            e.HasIndex(x => new { x.TenantId, x.Name });
+            e.Property(x => x.Name).HasMaxLength(200);
+        });
+        m.Entity<LoyaltyProgram>(e => { e.ToTable("loyalty_programs"); e.HasKey(x => x.TenantId); });
+        m.Entity<LoyaltyTransaction>(e =>
+        {
+            e.ToTable("loyalty_transactions");
+            e.HasIndex(x => new { x.TenantId, x.UniqueKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CustomerId });
+            e.HasOne<Customer>().WithMany().HasForeignKey(x => new { x.TenantId, x.CustomerId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<FinancialTitle>(e =>
+        {
+            e.ToTable("financial_titles");
+            e.HasIndex(x => new { x.TenantId, x.Kind, x.Status, x.DueDate });
+            e.HasIndex(x => new { x.TenantId, x.GroupId });
+            e.Property(x => x.Description).HasMaxLength(200);
+        });
+        m.Entity<SaleReturn>(e =>
+        {
+            e.ToTable("sale_returns");
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+            e.HasIndex(x => new { x.TenantId, x.SaleId });
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasOne<Sale>().WithMany().HasForeignKey(x => new { x.TenantId, x.SaleId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(i => new { i.TenantId, i.SaleReturnId }).HasPrincipalKey(s => new { s.TenantId, s.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<SaleReturnItem>(e => e.ToTable("sale_return_items"));
+        m.Entity<Sale>(e => e.HasOne<Customer>().WithMany().HasForeignKey(x => new { x.TenantId, x.CustomerId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict));
 
         // FK para tenants em todas as entidades com escopo + filtro global de isolamento.
         foreach (var et in m.Model.GetEntityTypes().Where(t => typeof(ITenantScoped).IsAssignableFrom(t.ClrType)).ToList())

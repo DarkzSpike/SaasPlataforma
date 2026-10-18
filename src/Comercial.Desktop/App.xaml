@@ -16,6 +16,11 @@
             <DataTemplate DataType="{x:Type local:ProfitViewModel}"><views:ProfitView/></DataTemplate>
             <DataTemplate DataType="{x:Type local:StockViewModel}"><views:StockView/></DataTemplate>
             <DataTemplate DataType="{x:Type local:CashHistoryViewModel}"><views:CashView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:PurchasesViewModel}"><views:PurchasesView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:CustomersViewModel}"><views:CustomersView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:FinanceViewModel}"><views:FinanceView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:PendingViewModel}"><views:PendingView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:AlertsViewModel}"><views:AlertsView/></DataTemplate>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

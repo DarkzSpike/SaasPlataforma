@@ -21,9 +21,12 @@ public sealed record CreateSaleRequest(
     List<SalePaymentRequest> Payments,
     long SaleDiscountCents = 0,
     Guid? DeviceId = null,
-    bool CreatedOffline = false);
+    bool CreatedOffline = false,
+    Guid? CustomerId = null,
+    int RedeemPoints = 0);
 
-public sealed record SaleResponse(Guid Id, string IdempotencyKey, string Status, long SubtotalCents, long DiscountCents, long TotalCents, long ChangeCents, bool Duplicate);
+public sealed record SaleResponse(Guid Id, string IdempotencyKey, string Status, long SubtotalCents, long DiscountCents, long TotalCents, long ChangeCents, bool Duplicate,
+    long LoyaltyDiscountCents = 0, int PointsEarned = 0);
 
 public sealed record OperatingEventRequest(string IdempotencyKey, Guid StoreId, int Type, DateTimeOffset LocalTime, bool Offline = false, Guid? DeviceId = null);
 

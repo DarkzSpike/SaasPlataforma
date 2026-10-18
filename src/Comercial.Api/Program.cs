@@ -44,6 +44,12 @@ builder.Services.AddScoped<BrandingService>();
 builder.Services.AddScoped<SupportService>();
 builder.Services.AddScoped<PaymentWebhookService>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<StockAlertService>();
+builder.Services.AddScoped<PurchasingService>();
+builder.Services.AddScoped<CustomerService>();
+builder.Services.AddScoped<LoyaltyService>();
+builder.Services.AddScoped<FinanceService>();
+builder.Services.AddScoped<ReturnService>();
 builder.Services.AddScoped<ProductImageService>();
 builder.Services.AddSingleton<IProductImageStore, LocalProductImageStore>();
 if (config["ProductImages:Provider"] == "GoogleDrive")
@@ -119,6 +125,7 @@ app.UseMiddleware<ActorResolutionMiddleware>();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapTenantApi();
+app.MapBusinessApi();
 app.MapAdminApi();
 app.MapPost("/webhooks/payments/{provider}", async (string provider, HttpRequest req, PaymentWebhookService s, TenantContext tenant) =>
 {

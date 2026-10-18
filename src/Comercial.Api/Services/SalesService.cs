@@ -12,7 +12,7 @@ public sealed record CancelSaleRequest(string Reason);
 
 public sealed class SalesService(
     AppDbContext db, RequestActor actor, AuditService audit, StockService stock,
-    ScopedLookup lookup, FeatureAuthorization features)
+    ScopedLookup lookup, FeatureAuthorization features, LoyaltyService loyalty, StockAlertService stockAlerts, TimeProvider clock)
 {
     public const int MaxItems = 500;
 
@@ -76,9 +76,32 @@ public sealed class SalesService(
             await audit.WriteNowAsync("security.discount_denied", actor.TenantId, "Sale", r.IdempotencyKey, new { discount, subtotal });
             throw new DomainException("discount_not_authorized", "Desconto acima do limite permitido para o operador.", 403);
         }
+        // 3b) Cliente (CRM) e resgate de pontos (fidelidade). Pontos não contam no limite de desconto do operador.
+        var modules = await features.ModulesAsync();
+        LoyaltyProgram? program = null;
+        long loyaltyDiscount = 0;
+        if (r.CustomerId is { } customerId)
+        {
+            if (!modules.Contains(ModuleKeys.Crm)) throw new DomainException("module_not_enabled", "Cadastro de clientes não contratado.", 403);
+            var customer = await lookup.GetAsync<Customer>(customerId);
+            if (!customer.IsActive) throw new DomainException("customer_inactive", "Cliente inativo.", 409);
+            sale.CustomerId = customer.Id;
+            if (modules.Contains(ModuleKeys.Loyalty)) program = await loyalty.ProgramAsync(actor.TenantId);
+        }
+        if (r.RedeemPoints != 0)
+        {
+            if (r.RedeemPoints < 0) throw new DomainException("invalid_points", "Quantidade de pontos inválida.");
+            if (program is not { Enabled: true }) throw new DomainException("loyalty_unavailable", "Resgate de pontos indisponível (cliente ou fidelidade).", 409);
+            if (r.RedeemPoints < program.MinPointsToRedeem) throw new DomainException("points_below_minimum", $"Resgate mínimo de {program.MinPointsToRedeem} pontos.");
+            loyaltyDiscount = (long)r.RedeemPoints * program.CentsPerPoint;
+            if (loyaltyDiscount > (subtotal - discount) * program.MaxRedeemPercent / 100)
+                throw new DomainException("redeem_limit", $"Pontos podem pagar no máximo {program.MaxRedeemPercent}% da compra.");
+            sale.LoyaltyPointsRedeemed = r.RedeemPoints;
+        }
         sale.SubtotalCents = subtotal;
-        sale.DiscountCents = discount;
-        sale.TotalCents = subtotal - discount;
+        sale.LoyaltyDiscountCents = loyaltyDiscount;
+        sale.DiscountCents = discount + loyaltyDiscount;
+        sale.TotalCents = subtotal - discount - loyaltyDiscount;
 
         // 4) Pagamentos: troco somente sobre dinheiro; cartões/PIX não podem exceder o total.
         long paid = 0, nonCash = 0, cashPaid = 0;
@@ -95,7 +118,8 @@ public sealed class SalesService(
         sale.ChangeCents = paid - sale.TotalCents;
         if (sale.ChangeCents > cashPaid) throw new DomainException("invalid_change", "Troco maior que o valor em dinheiro.");
 
-        // 5) Gravação transacional: venda + itens + pagamentos + estoque + caixa + documento fiscal pendente.
+        // 5) Gravação transacional: venda + itens + pagamentos + estoque + caixa + documento fiscal pendente + pontos.
+        var pointsEarned = 0;
         await using var tx = await db.Database.BeginTransactionAsync();
         try
         {
@@ -103,9 +127,32 @@ public sealed class SalesService(
             var netCash = cashPaid - sale.ChangeCents;
             if (netCash != 0)
                 db.CashMovements.Add(new CashMovement { CashSessionId = session.Id, Type = CashMovementType.CashSale, AmountCents = netCash, UserId = actor.UserId.Value, ReferenceId = sale.Id });
-            if ((await features.ModulesAsync()).Contains(ModuleKeys.Fiscal))
+            if (modules.Contains(ModuleKeys.Fiscal))
                 db.FiscalDocuments.Add(new FiscalDocument { SaleId = sale.Id, Model = FiscalModel.NFCe, Status = FiscalStatus.PendingTransmission, LastMessage = "Aguardando transmissão." });
-            audit.Add("sale.created", actor.TenantId, nameof(Sale), sale.Id, new { sale.TotalCents, sale.DiscountCents, items = sale.Items.Count, r.CreatedOffline });
+            audit.Add("sale.created", actor.TenantId, nameof(Sale), sale.Id, new { sale.TotalCents, sale.DiscountCents, items = sale.Items.Count, r.CreatedOffline, customer = sale.CustomerId is not null, sale.LoyaltyPointsRedeemed });
+            await db.SaveChangesAsync(); // a gravação da auditoria serializa as transações: o saldo de pontos abaixo é consistente
+
+            var now = clock.GetUtcNow();
+            if (sale.LoyaltyPointsRedeemed > 0)
+            {
+                var balance = await loyalty.BalanceAsync(sale.CustomerId!.Value);
+                if (balance.Available < sale.LoyaltyPointsRedeemed)
+                    throw new DomainException("insufficient_points", $"Saldo de pontos insuficiente ({balance.Available}).", 409);
+                db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                {
+                    CustomerId = sale.CustomerId.Value, SaleId = sale.Id, Type = LoyaltyType.Redeem, Points = -sale.LoyaltyPointsRedeemed,
+                    UniqueKey = $"redeem:{sale.Id}", Reason = "resgate na venda", CreatedAt = now,
+                });
+            }
+            if (program is { Enabled: true } && LoyaltyService.PointsFor(sale.TotalCents, program) is var earned and > 0)
+            {
+                db.LoyaltyTransactions.Add(new LoyaltyTransaction
+                {
+                    CustomerId = sale.CustomerId!.Value, SaleId = sale.Id, Type = LoyaltyType.Earn, Points = earned, UniqueKey = $"earn:{sale.Id}",
+                    Reason = "compra", CreatedAt = now, ExpiresAt = program.ExpirationDays > 0 ? now.AddDays(program.ExpirationDays) : null,
+                });
+                pointsEarned = earned;
+            }
             await db.SaveChangesAsync();
 
             foreach (var item in sale.Items)
@@ -122,7 +169,8 @@ public sealed class SalesService(
             if (winner is not null) return ToResponse(winner, duplicate: true);
             throw;
         }
-        return ToResponse(sale, duplicate: false);
+        await stockAlerts.CheckAsync(sale.StoreId, sale.Items.Select(i => i.ProductId));
+        return ToResponse(sale, duplicate: false) with { PointsEarned = pointsEarned };
     }
 
     public async Task<Sale> CancelAsync(Guid saleId, CancelSaleRequest r)
@@ -131,6 +179,7 @@ public sealed class SalesService(
             throw new DomainException("reason_required", "Informe o motivo do cancelamento (mínimo 5 caracteres).");
         var sale = await lookup.GetAsync<Sale>(saleId, q => q.Include(s => s.Items).Include(s => s.Payments));
         if (sale.Status != SaleStatus.Completed) throw new DomainException("sale_not_completed", "Venda já cancelada.", 409);
+        if (sale.ReturnedCents > 0) throw new DomainException("has_returns", "Venda com devolução parcial: use a devolução para os itens restantes.", 409);
 
         var fiscal = await db.FiscalDocuments.FirstOrDefaultAsync(f => f.SaleId == sale.Id);
         if (fiscal is { Status: FiscalStatus.Authorized })
@@ -158,6 +207,7 @@ public sealed class SalesService(
             fiscal.LastMessage = "Venda cancelada antes da autorização.";
         }
         audit.Add("sale.cancelled", actor.TenantId, nameof(Sale), sale.Id, new { r.Reason, sale.TotalCents });
+        await ReverseLoyaltyAsync(sale, 1m, "cancelamento", "cancel");
         await db.SaveChangesAsync();
         foreach (var item in sale.Items)
             await stock.MoveAsync(sale.StoreId, item.ProductId, item.Quantity, StockMovementType.SaleCancellation, r.Reason, sale.Id, item.UnitCostCents);
@@ -165,6 +215,37 @@ public sealed class SalesService(
         return sale;
     }
 
+    /// <summary>
+    /// Estorna pontos proporcionalmente (fração 1 = cancelamento total): remove os pontos ganhos e devolve os resgatados.
+    /// A chave única por operação impede estorno em dobro.
+    /// </summary>
+    public async Task ReverseLoyaltyAsync(Sale sale, decimal fraction, string reason, string keySuffix)
+    {
+        if (sale.CustomerId is null) return;
+        var txs = await db.LoyaltyTransactions.AsNoTracking().Where(t => t.SaleId == sale.Id).ToListAsync();
+        var earned = txs.Where(t => t.Type == LoyaltyType.Earn).Sum(t => t.Points);
+        var reversed = -txs.Where(t => t.Type == LoyaltyType.EarnReversal).Sum(t => t.Points);
+        var redeemed = -txs.Where(t => t.Type == LoyaltyType.Redeem).Sum(t => t.Points);
+        var refunded = txs.Where(t => t.Type == LoyaltyType.RedeemRefund).Sum(t => t.Points);
+        var program = await loyalty.ProgramAsync(sale.TenantId);
+        var now = clock.GetUtcNow();
+        var takeBack = Math.Min(earned - reversed, (int)Math.Ceiling(earned * fraction));
+        if (takeBack > 0)
+            db.LoyaltyTransactions.Add(new LoyaltyTransaction
+            {
+                CustomerId = sale.CustomerId.Value, SaleId = sale.Id, Type = LoyaltyType.EarnReversal, Points = -takeBack,
+                UniqueKey = $"earnrev:{sale.Id}:{keySuffix}", Reason = reason, CreatedAt = now,
+            });
+        var giveBack = Math.Min(redeemed - refunded, (int)Math.Floor(redeemed * fraction));
+        if (giveBack > 0)
+            db.LoyaltyTransactions.Add(new LoyaltyTransaction
+            {
+                CustomerId = sale.CustomerId.Value, SaleId = sale.Id, Type = LoyaltyType.RedeemRefund, Points = giveBack,
+                UniqueKey = $"redeemref:{sale.Id}:{keySuffix}", Reason = reason, CreatedAt = now,
+                ExpiresAt = program.ExpirationDays > 0 ? now.AddDays(program.ExpirationDays) : null,
+            });
+    }
+
     public static SaleResponse ToResponse(Sale s, bool duplicate) =>
-        new(s.Id, s.IdempotencyKey, s.Status.ToString(), s.SubtotalCents, s.DiscountCents, s.TotalCents, s.ChangeCents, duplicate);
+        new(s.Id, s.IdempotencyKey, s.Status.ToString(), s.SubtotalCents, s.DiscountCents, s.TotalCents, s.ChangeCents, duplicate, s.LoyaltyDiscountCents);
 }

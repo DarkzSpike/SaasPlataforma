@@ -1132,3 +1132,392 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    ALTER TABLE sales ADD "CustomerId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    ALTER TABLE sales ADD "LoyaltyDiscountCents" bigint NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    ALTER TABLE sales ADD "LoyaltyPointsRedeemed" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    ALTER TABLE sales ADD "ReturnedCents" bigint NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE customers (
+        "Id" uuid NOT NULL,
+        "Name" character varying(200) NOT NULL,
+        "Document" text,
+        "Email" text,
+        "Phone" text,
+        "BirthDate" date,
+        "Notes" text,
+        "MarketingConsent" boolean NOT NULL,
+        "ConsentAt" timestamp with time zone,
+        "IsActive" boolean NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "AnonymizedAt" timestamp with time zone,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_customers" PRIMARY KEY ("Id"),
+        CONSTRAINT "AK_customers_TenantId_Id" UNIQUE ("TenantId", "Id"),
+        CONSTRAINT "FK_customers_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE financial_titles (
+        "Id" uuid NOT NULL,
+        "Kind" integer NOT NULL,
+        "Description" character varying(200) NOT NULL,
+        "Category" text NOT NULL,
+        "CostCenter" text,
+        "Counterparty" text,
+        "SupplierId" uuid,
+        "CustomerId" uuid,
+        "PurchaseOrderId" uuid,
+        "DueDate" date NOT NULL,
+        "AmountCents" bigint NOT NULL,
+        "Status" integer NOT NULL,
+        "PaidOn" date,
+        "PaidAmountCents" bigint,
+        "PaymentMethod" text,
+        "GroupId" uuid NOT NULL,
+        "InstallmentNumber" integer NOT NULL,
+        "InstallmentCount" integer NOT NULL,
+        "Notes" text,
+        "CancelReason" text,
+        "CreatedByUserId" uuid NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_financial_titles" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_financial_titles_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE loyalty_programs (
+        "TenantId" uuid NOT NULL,
+        "Enabled" boolean NOT NULL,
+        "PointsPerReal" integer NOT NULL,
+        "CentsPerPoint" integer NOT NULL,
+        "MinPointsToRedeem" integer NOT NULL,
+        "ExpirationDays" integer NOT NULL,
+        "MaxRedeemPercent" integer NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        CONSTRAINT "PK_loyalty_programs" PRIMARY KEY ("TenantId"),
+        CONSTRAINT "FK_loyalty_programs_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE purchase_receipts (
+        "Id" uuid NOT NULL,
+        "PurchaseOrderId" uuid NOT NULL,
+        "UserId" uuid NOT NULL,
+        "InvoiceNumber" text,
+        "Notes" text,
+        "DivergenceJson" text,
+        "TotalCents" bigint NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_purchase_receipts" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_purchase_receipts_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE sale_returns (
+        "Id" uuid NOT NULL,
+        "SaleId" uuid NOT NULL,
+        "UserId" uuid NOT NULL,
+        "Reason" text NOT NULL,
+        "Restock" boolean NOT NULL,
+        "RefundMethod" text NOT NULL,
+        "RefundCents" bigint NOT NULL,
+        "CostCents" bigint NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_sale_returns" PRIMARY KEY ("Id"),
+        CONSTRAINT "AK_sale_returns_TenantId_Id" UNIQUE ("TenantId", "Id"),
+        CONSTRAINT "FK_sale_returns_sales_TenantId_SaleId" FOREIGN KEY ("TenantId", "SaleId") REFERENCES sales ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_sale_returns_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE suppliers (
+        "Id" uuid NOT NULL,
+        "Name" character varying(200) NOT NULL,
+        "Document" text,
+        "ContactName" text,
+        "Email" text,
+        "Phone" text,
+        "LeadTimeDays" integer NOT NULL,
+        "Notes" text,
+        "IsActive" boolean NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_suppliers" PRIMARY KEY ("Id"),
+        CONSTRAINT "AK_suppliers_TenantId_Id" UNIQUE ("TenantId", "Id"),
+        CONSTRAINT "FK_suppliers_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE loyalty_transactions (
+        "Id" uuid NOT NULL,
+        "CustomerId" uuid NOT NULL,
+        "SaleId" uuid,
+        "Type" integer NOT NULL,
+        "Points" integer NOT NULL,
+        "UniqueKey" text NOT NULL,
+        "Reason" text,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ExpiresAt" timestamp with time zone,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_loyalty_transactions" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_loyalty_transactions_customers_TenantId_CustomerId" FOREIGN KEY ("TenantId", "CustomerId") REFERENCES customers ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_loyalty_transactions_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE sale_return_items (
+        "Id" uuid NOT NULL,
+        "SaleReturnId" uuid NOT NULL,
+        "SaleItemId" uuid NOT NULL,
+        "ProductId" uuid NOT NULL,
+        "Quantity" numeric(18,3) NOT NULL,
+        "RefundCents" bigint NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_sale_return_items" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_sale_return_items_sale_returns_TenantId_SaleReturnId" FOREIGN KEY ("TenantId", "SaleReturnId") REFERENCES sale_returns ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_sale_return_items_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE purchase_orders (
+        "Id" uuid NOT NULL,
+        "Number" integer NOT NULL,
+        "SupplierId" uuid NOT NULL,
+        "StoreId" uuid NOT NULL,
+        "Status" integer NOT NULL,
+        "Notes" text,
+        "ExpectedAt" date,
+        "CreatedByUserId" uuid NOT NULL,
+        "ApprovedByUserId" uuid,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ApprovedAt" timestamp with time zone,
+        "ClosedAt" timestamp with time zone,
+        "CancelReason" text,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_purchase_orders" PRIMARY KEY ("Id"),
+        CONSTRAINT "AK_purchase_orders_TenantId_Id" UNIQUE ("TenantId", "Id"),
+        CONSTRAINT "FK_purchase_orders_stores_TenantId_StoreId" FOREIGN KEY ("TenantId", "StoreId") REFERENCES stores ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_purchase_orders_suppliers_TenantId_SupplierId" FOREIGN KEY ("TenantId", "SupplierId") REFERENCES suppliers ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_purchase_orders_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE TABLE purchase_items (
+        "Id" uuid NOT NULL,
+        "PurchaseOrderId" uuid NOT NULL,
+        "ProductId" uuid NOT NULL,
+        "ProductName" text NOT NULL,
+        "QuantityOrdered" numeric(18,3) NOT NULL,
+        "QuantityReceived" numeric(18,3) NOT NULL,
+        "UnitCostCents" bigint NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_purchase_items" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_purchase_items_products_TenantId_ProductId" FOREIGN KEY ("TenantId", "ProductId") REFERENCES products ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_purchase_items_purchase_orders_TenantId_PurchaseOrderId" FOREIGN KEY ("TenantId", "PurchaseOrderId") REFERENCES purchase_orders ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_purchase_items_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_sales_TenantId_CustomerId" ON sales ("TenantId", "CustomerId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE UNIQUE INDEX "IX_customers_TenantId_Document" ON customers ("TenantId", "Document") WHERE "Document" IS NOT NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_customers_TenantId_Name" ON customers ("TenantId", "Name");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_financial_titles_TenantId_GroupId" ON financial_titles ("TenantId", "GroupId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_financial_titles_TenantId_Kind_Status_DueDate" ON financial_titles ("TenantId", "Kind", "Status", "DueDate");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_loyalty_transactions_TenantId_CustomerId" ON loyalty_transactions ("TenantId", "CustomerId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE UNIQUE INDEX "IX_loyalty_transactions_TenantId_UniqueKey" ON loyalty_transactions ("TenantId", "UniqueKey");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_purchase_items_TenantId_ProductId" ON purchase_items ("TenantId", "ProductId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_purchase_items_TenantId_PurchaseOrderId" ON purchase_items ("TenantId", "PurchaseOrderId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE UNIQUE INDEX "IX_purchase_orders_TenantId_Number" ON purchase_orders ("TenantId", "Number");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_purchase_orders_TenantId_StoreId" ON purchase_orders ("TenantId", "StoreId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_purchase_orders_TenantId_SupplierId" ON purchase_orders ("TenantId", "SupplierId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_purchase_receipts_TenantId_PurchaseOrderId" ON purchase_receipts ("TenantId", "PurchaseOrderId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_sale_return_items_TenantId_SaleReturnId" ON sale_return_items ("TenantId", "SaleReturnId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_sale_returns_TenantId_CreatedAt" ON sale_returns ("TenantId", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_sale_returns_TenantId_SaleId" ON sale_returns ("TenantId", "SaleId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    CREATE INDEX "IX_suppliers_TenantId_Name" ON suppliers ("TenantId", "Name");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    ALTER TABLE sales ADD CONSTRAINT "FK_sales_customers_TenantId_CustomerId" FOREIGN KEY ("TenantId", "CustomerId") REFERENCES customers ("TenantId", "Id") ON DELETE RESTRICT;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018111836_ComprasClientesFinanceiro') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261018111836_ComprasClientesFinanceiro', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+

@@ -31,7 +31,7 @@ public class Product : TenantEntity
     public DateTimeOffset? ImageUpdatedAt { get; set; }
 }
 
-public enum StockMovementType { Entry = 1, Sale = 2, Adjustment = 3, SaleCancellation = 4, TransferIn = 5, TransferOut = 6 }
+public enum StockMovementType { Entry = 1, Sale = 2, Adjustment = 3, SaleCancellation = 4, TransferIn = 5, TransferOut = 6, Return = 7, PurchaseReceipt = 8 }
 
 /// <summary>Movimentação imutável. Correções geram nova movimentação, nunca edição.</summary>
 public class StockMovement : TenantEntity
@@ -78,6 +78,13 @@ public class Sale : TenantEntity
     public DateTimeOffset? CancelledAt { get; set; }
     public Guid? CancelledByUserId { get; set; }
     public string? CancelReason { get; set; }
+    /// <summary>Cliente identificado na venda (módulo CRM), opcional.</summary>
+    public Guid? CustomerId { get; set; }
+    /// <summary>Parte do desconto paga com pontos de fidelidade (não conta no limite de desconto do operador).</summary>
+    public long LoyaltyDiscountCents { get; set; }
+    public int LoyaltyPointsRedeemed { get; set; }
+    /// <summary>Total já devolvido ao cliente em trocas/devoluções.</summary>
+    public long ReturnedCents { get; set; }
     public List<SaleItem> Items { get; set; } = [];
     public List<SalePayment> Payments { get; set; } = [];
 }

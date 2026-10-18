@@ -19,6 +19,8 @@
             <StackPanel Grid.Column="3" Orientation="Horizontal" Visibility="{Binding NormalMode, Converter={StaticResource Vis}}">
                 <Button Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE710;" Content="Novo produto" Margin="0,0,10,0" Command="{Binding NewProductCommand}"/>
                 <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE9D5;" Content="Fazer inventário" Command="{Binding StartInventoryCommand}"/>
+                <Button Style="{StaticResource DarkButton}" Content="CSV" Margin="10,0,0,0" Command="{Binding ExportCommand}" ToolTip="Exportar estoque em CSV"
+                        Visibility="{Binding CanExport, Converter={StaticResource Vis}}"/>
             </StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" Visibility="{Binding InventoryMode, Converter={StaticResource Vis}}">
                 <Button Style="{StaticResource DarkButton}" Content="Cancelar" Margin="0,0,10,0" Command="{Binding CancelInventoryCommand}"/>

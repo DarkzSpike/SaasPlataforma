@@ -9,8 +9,12 @@ namespace Comercial.Desktop;
 /// Janela de venda concluída: mostra o troco e só fecha quando o operador confirma que entregou.
 /// Enquanto aberta, nenhuma nova venda pode ser registrada.
 /// </summary>
-public sealed class SaleDoneViewModel(long totalCents, long paidCents, string method, Action onConfirm) : ObservableObject
+public sealed class SaleDoneViewModel(long totalCents, long paidCents, string method, Action onConfirm, Receipt? receipt = null) : ObservableObject
 {
+    public Receipt? Receipt { get; } = receipt;
+    public bool CanPrint => Receipt is not null;
+    public RelayCommand PrintCommand { get; } = RelayCommand.Sync(_ => { if (receipt is not null) ReceiptPrinter.Print(receipt); });
+    public string PointsText => receipt is { PointsEarned: > 0 } r ? $"Cliente ganhou {r.PointsEarned} ponto(s)" : "";
     public long ChangeCents => paidCents - totalCents;
     public bool HasChange => ChangeCents > 0;
     public string ChangeText => AppServices.Money(ChangeCents);
@@ -22,13 +26,17 @@ public sealed class SaleDoneViewModel(long totalCents, long paidCents, string me
     public RelayCommand ConfirmCommand { get; } = RelayCommand.Sync(_ => onConfirm());
 }
 
-public sealed class FormField(string key, string label, string value = "", string icon = "", string placeholder = "") : ObservableObject
+public sealed class FormField(string key, string label, string value = "", string icon = "", string placeholder = "", IReadOnlyList<string>? options = null) : ObservableObject
 {
     private string _value = value;
     public string Key { get; } = key;
     public string Label { get; } = label;
     public string Icon { get; } = icon;
     public string Placeholder { get; } = placeholder;
+    /// <summary>Quando informado, o campo vira uma lista de escolha.</summary>
+    public IReadOnlyList<string>? Options { get; } = options;
+    public bool IsChoice => Options is not null;
+    public bool IsText => Options is null;
     public string Value { get => _value; set => Set(ref _value, value); }
 }
 

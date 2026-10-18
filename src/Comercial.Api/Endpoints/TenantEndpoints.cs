@@ -147,7 +147,7 @@ public static class TenantEndpoints
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
 
         // Inventário (auditoria por contagem): ajusta o saldo para o valor contado, preservando o histórico.
-        stock.MapPost("/inventory", async (InventoryRequest r, AppDbContext db, StockService s, AuditService audit, RequestActor a) =>
+        stock.MapPost("/inventory", async (InventoryRequest r, AppDbContext db, StockService s, AuditService audit, RequestActor a, StockAlertService alerts) =>
         {
             if (string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Trim().Length < 5) throw new DomainException("reason_required", "Informe o motivo do inventário (mínimo 5 caracteres).");
             if (r.Counts is null || r.Counts.Count == 0 || r.Counts.Count > 5000) throw new DomainException("invalid_counts", "Informe as contagens.");
@@ -173,6 +173,7 @@ public static class TenantEndpoints
             audit.Add("stock.inventory", a.TenantId, "Store", r.StoreId, new { r.Reason, items = r.Counts.Count, adjusted = result.Count(x => x.Difference != 0) });
             await db.SaveChangesAsync();
             await tx.CommitAsync();
+            await alerts.CheckAsync(r.StoreId, result.Where(x => x.Difference < 0).Select(x => x.ProductId));
             return Results.Ok(result);
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockAdjust, write: true);
         stock.MapGet("/movements", async (AppDbContext db, Guid productId) =>
@@ -189,7 +190,7 @@ public static class TenantEndpoints
             await tx.CommitAsync();
             return Results.NoContent();
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockEntry, write: true);
-        stock.MapPost("/adjustments", async (StockAdjustRequest r, AppDbContext db, StockService s, ScopedLookup l, AuditService audit, RequestActor a) =>
+        stock.MapPost("/adjustments", async (StockAdjustRequest r, AppDbContext db, StockService s, ScopedLookup l, AuditService audit, RequestActor a, StockAlertService alerts) =>
         {
             if (r.Quantity == 0 || Math.Abs(r.Quantity) > 1_000_000) throw new DomainException("invalid_quantity", "Quantidade inválida.");
             if (string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Length < 5) throw new DomainException("reason_required", "Ajuste exige motivo (mínimo 5 caracteres).");
@@ -199,6 +200,7 @@ public static class TenantEndpoints
             audit.Add("stock.adjustment", a.TenantId, nameof(Product), r.ProductId, r);
             await s.MoveAsync(r.StoreId, r.ProductId, r.Quantity, StockMovementType.Adjustment, r.Reason, null, p.CostCents);
             await tx.CommitAsync();
+            if (r.Quantity < 0) await alerts.CheckAsync(r.StoreId, [r.ProductId]);
             return Results.NoContent();
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockAdjust, write: true);
 
@@ -316,7 +318,7 @@ public static class TenantEndpoints
         }).RequireFeature(ModuleKeys.Pdv, Permissions.ReportsRead);
 
         // ---------- Lucratividade (módulo 12) ----------
-        api.MapGet("/reports/profitability", async (AppDbContext db, RequestActor a, DateTimeOffset from, DateTimeOffset to, Guid? storeId) =>
+        api.MapGet("/reports/profitability", async (AppDbContext db, RequestActor a, FeatureAuthorization f, FinanceService finance, DateTimeOffset from, DateTimeOffset to, Guid? storeId) =>
         {
             if (to <= from || to - from > TimeSpan.FromDays(400)) throw new DomainException("invalid_period", "Período inválido (máx. 400 dias).");
             var tz = await StoreClock.ZoneAsync(db, a);
@@ -353,17 +355,30 @@ public static class TenantEndpoints
                     costCents = g.Sum(s => costBySale.GetValueOrDefault(s.Id)),
                     grossProfitCents = g.Sum(s => s.TotalCents - costBySale.GetValueOrDefault(s.Id)),
                 }).ToList();
+            // Devoluções no período: reduzem a receita; o custo só volta se o produto retornou ao estoque.
+            var returns = await db.SaleReturns.AsNoTracking().Where(x => x.CreatedAt >= from && x.CreatedAt < to)
+                .Select(x => new { x.RefundCents, x.CostCents, x.Restock }).ToListAsync();
+            var returnsCents = returns.Sum(x => x.RefundCents);
+            var restockedCost = returns.Where(x => x.Restock).Sum(x => x.CostCents);
+            var netRevenue = revenue - returnsCents;
+            var netCost = cost - restockedCost;
+            long? expenses = null;
+            if ((await f.ModulesAsync()).Contains(ModuleKeys.Expenses))
+                expenses = await finance.OperatingExpensesAsync(DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(from, tz).DateTime), DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(to, tz).DateTime));
+            var gross = netRevenue - netCost;
             return Results.Ok(new
             {
                 from, to, storeId = st, timeZone = tz.Id,
                 totals = new
                 {
-                    salesCount = sales.Count, revenueCents = revenue, costCents = cost, grossProfitCents = revenue - cost,
-                    marginPercent = revenue == 0 ? 0 : Math.Round((revenue - cost) * 100m / revenue, 1),
+                    salesCount = sales.Count, revenueCents = revenue, returnsCents, netRevenueCents = netRevenue, costCents = netCost, grossProfitCents = gross,
+                    marginPercent = netRevenue == 0 ? 0 : Math.Round(gross * 100m / netRevenue, 1),
                     saleLevelDiscountCents = saleLevelDiscount,
+                    expensesCents = expenses,
+                    netResultCents = expenses is { } e ? gross - e : (long?)null,
                 },
                 products, daily,
-                note = "Lucro bruto estimado = vendas − custo histórico registrado em cada venda. Não inclui despesas, impostos nem taxas de cartão; não é resultado contábil.",
+                note = "Lucro bruto estimado = vendas − devoluções − custo histórico dos itens. Resultado líquido estimado = lucro bruto − despesas lançadas (sem compra de mercadoria). Impostos e taxas só entram se lançados como despesa; não é resultado contábil.",
             });
         }).RequireFeature(ModuleKeys.Profitability, Permissions.ReportsFinancial);
 

@@ -1,0 +1,40 @@
+<UserControl x:Class="Comercial.Desktop.Views.PendingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Comercial.Desktop">
+    <DockPanel>
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+        <Border DockPanel.Dock="Top" Background="#1F1E8CFF" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+            <TextBlock Foreground="White" TextWrapping="Wrap"
+                       Text="Vendas feitas sem internet que o servidor recusou ao sincronizar ficam aqui (nada se perde). Reenviar registra a venda no SEU caixa pelo preço atual, com a diferença como desconto autorizado. Descartar exige motivo e fica na auditoria."/>
+        </Border>
+        <Border Style="{StaticResource Card}" ClipToBounds="True">
+            <Grid>
+                <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Items}" RowHeight="56" AutomationProperties.Name="Operações recusadas">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Quando" Binding="{Binding When}" Width="150"/>
+                        <DataGridTextColumn Header="Tipo" Binding="{Binding Type}" Width="170"/>
+                        <DataGridTextColumn Header="Valor cobrado" Binding="{Binding Total}" Width="130"/>
+                        <DataGridTextColumn Header="Motivo da recusa" Binding="{Binding Reason}" Width="*"/>
+                        <DataGridTemplateColumn Header="Decisão" Width="290">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Style="{StaticResource PrimaryButton}" Content="Reenviar" Height="36" Padding="14,0" Margin="0,0,8,0"
+                                                Command="{Binding DataContext.ResendCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
+                                        <Button Style="{StaticResource DarkButton}" Content="Descartar" Height="36" Padding="14,0" Foreground="{DynamicResource DangerBrush}"
+                                                Command="{Binding DataContext.DiscardCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsEmpty, Converter={StaticResource Vis}}">
+                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE73E;" FontSize="48" HorizontalAlignment="Center" Foreground="{DynamicResource PrimaryBrush}"/>
+                    <TextBlock Text="Nenhuma pendência neste terminal." Foreground="White" FontSize="17" Margin="0,12,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </DockPanel>
+</UserControl>

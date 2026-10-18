@@ -30,8 +30,11 @@ public static class Snapshot
             Session = new SessionInfo
             {
                 TenantName = "Loja Demo", License = "active",
-                Permissions = ["sales.read", "sales.cancel", "reports.read", "reports.financial", "stock.read", "cash.review", "cash.operate", "sales.create", "products.write", "stock.entry", "stock.adjust"],
-                Modules = ["pdv", "estoque", "caixa", "app_proprietario", "lucratividade", "white_label"],
+                Permissions = ["sales.read", "sales.cancel", "reports.read", "reports.financial", "stock.read", "cash.review", "cash.operate", "sales.create", "products.write", "stock.entry", "stock.adjust",
+                    "purchases.manage", "suppliers.manage", "purchases.approve", "purchases.receive", "customers.read", "customers.manage", "customers.privacy",
+                    "loyalty.manage", "finance.read", "finance.manage", "sync.reconcile", "reports.export", "sales.return"],
+                Modules = ["pdv", "estoque", "caixa", "app_proprietario", "lucratividade", "white_label", "compras", "fornecedores", "crm", "fidelidade",
+                    "contas", "financeiro", "despesas", "trocas", "relatorios_premium"],
             },
         };
         var main = new MainViewModel(services);
@@ -167,8 +170,70 @@ public static class Snapshot
         Save(window, Path.Combine(dir, "10-fechar-caixa.png"));
         shell.Prompt = null;
 
-        shell.ShowSaleDone(12740, 15000, "Dinheiro");
+        shell.ShowSaleDone(12740, 15000, "Dinheiro", new Receipt(DateTime.Now, [new ReceiptLine("Caneca de cerâmica 300 ml", 2, 2490, 4980)], 12740, 0, 15000, "Dinheiro", "Maria Silva", 127));
         Save(window, Path.Combine(dir, "11-troco.png"));
+        shell.SaleDone = null;
+
+        shell.Pos.SetCustomerForPreview("Maria Silva", 340);
+        shell.Pos.Redeem = "200";
+        Save(window, Path.Combine(dir, "12-pdv-cliente-pontos.png"));
+
+        var pur = new PurchasesViewModel(shell);
+        pur.Suppliers.Add(new SupplierRow(Guid.NewGuid(), "Distribuidora Alfa", "12.345.678/0001-99", "Carlos", "(11) 3333-4444", 3));
+        pur.Suppliers.Add(new SupplierRow(Guid.NewGuid(), "Utilidades Beta", "98.765.432/0001-10", "Ana", "(11) 2222-1111", 7));
+        pur.Orders.Add(new OrderRow(Guid.NewGuid(), 3, "Distribuidora Alfa", "Aprovado", "Approved", "18/10/2026", 3, "R$ 1.284,00"));
+        pur.Orders.Add(new OrderRow(Guid.NewGuid(), 2, "Utilidades Beta", "Recebido em parte", "PartiallyReceived", "15/10/2026", 2, "R$ 640,00"));
+        pur.Orders.Add(new OrderRow(Guid.NewGuid(), 1, "Distribuidora Alfa", "Recebido", "Received", "10/10/2026", 4, "R$ 2.110,50"));
+        typeof(PurchasesViewModel).GetField("_selected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(pur, pur.Orders[0]);
+        pur.Lines.Add(new OrderLine(Guid.NewGuid(), "Toalha de rosto algodão", 24, 0, 900) { ReceiveQty = "24" });
+        pur.Lines.Add(new OrderLine(Guid.NewGuid(), "Caixa organizadora 20 L", 12, 0, 2300) { ReceiveQty = "12" });
+        pur.Lines.Add(new OrderLine(Guid.NewGuid(), "Pilha alcalina AA (par)", 60, 0, 600) { ReceiveQty = "60" });
+        pur.DetailTitle = "Pedido #3 — Distribuidora Alfa"; pur.DetailInfo = "Aprovado • criado em 18/10/2026 • total R$ 1.284,00";
+        foreach (var n in new[] { "Viewing", "CanReceive", "Selected" })
+            pur.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(pur, [n]);
+        shell.ShowForPreview("purchases", pur);
+        Save(window, Path.Combine(dir, "13-compras.png"));
+
+        var cus = new CustomersViewModel(shell);
+        cus.Customers.Add(new CustomerRow(Guid.NewGuid(), "Maria Silva", "12345678901", "(11) 98888-7777", "maria@exemplo.com", true));
+        cus.Customers.Add(new CustomerRow(Guid.NewGuid(), "João Pereira", "98765432100", "(11) 97777-6666", "", false));
+        typeof(CustomersViewModel).GetField("_selected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(cus, cus.Customers[0]);
+        cus.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(cus, ["HasSelection"]);
+        cus.DetailTitle = "Maria Silva"; cus.DetailInfo = "12 compra(s) • total R$ 1.932,40 • aceita receber ofertas"; cus.PointsText = "340 ponto(s) disponíveis";
+        cus.Recent.Add(new SaleRow(Guid.NewGuid(), "18/10/2026 14:32", "", "", "", "R$ 74,70", "Concluída", false, false));
+        cus.Recent.Add(new SaleRow(Guid.NewGuid(), "11/10/2026 10:05", "", "", "", "R$ 139,60", "Concluída", false, false));
+        cus.Statement.Add(new StatementRow("18/10 14:32", "Compra", "+74", "compra", true));
+        cus.Statement.Add(new StatementRow("15/10 09:10", "Resgate", "-100", "resgate na venda", false));
+        cus.Statement.Add(new StatementRow("11/10 10:05", "Compra", "+139", "compra", true));
+        shell.ShowForPreview("customers", cus);
+        Save(window, Path.Combine(dir, "14-clientes.png"));
+
+        var fin = new FinanceViewModel(shell);
+        fin.Kpis.Add(new Kpi("A pagar no mês", "R$ 4.320,00", "em aberto", Icons.Calendar, "warn"));
+        fin.Kpis.Add(new Kpi("A receber no mês", "R$ 1.150,00", "em aberto", Icons.Money, "accent"));
+        fin.Kpis.Add(new Kpi("Vencidos", "R$ 380,00", "1 título(s)", Icons.History, "warn"));
+        fin.Kpis.Add(new Kpi("Pago no mês", "R$ 6.910,40", "recebido R$ 2.300,00", Icons.Chart, "primary"));
+        fin.Titles.Add(new TitleRow(Guid.NewGuid(), "Pagar", "Energia elétrica", "Energia", "Concessionária", "12/10/2026", "R$ 380,00", "Em aberto", true, true, false));
+        fin.Titles.Add(new TitleRow(Guid.NewGuid(), "Pagar", "Compra #3 — NF 4512", "Compra de mercadoria", "Distribuidora Alfa", "17/11/2026", "R$ 1.284,00", "Em aberto", false, true, false));
+        fin.Titles.Add(new TitleRow(Guid.NewGuid(), "Pagar", "Aluguel (2/12)", "Aluguel", "Imobiliária", "05/11/2026", "R$ 2.500,00", "Em aberto", false, true, false));
+        fin.Titles.Add(new TitleRow(Guid.NewGuid(), "Receber", "Venda a prazo — Mercado Gama", "Vendas a prazo", "Mercado Gama", "30/10/2026", "R$ 1.150,00", "Em aberto", false, true, false));
+        fin.Titles.Add(new TitleRow(Guid.NewGuid(), "Pagar", "Internet", "Internet/telefone", "Provedor", "08/10/2026", "R$ 129,90", "Pago", false, false, true));
+        shell.ShowForPreview("finance", fin);
+        Save(window, Path.Combine(dir, "15-financeiro.png"));
+
+        var pend = new PendingViewModel(shell);
+        pend.Items.Add(new PendingRow("sale-1", "Venda", "17/10/2026 19:42", "R$ 49,80", 4980, PendingViewModel.Reason("price_mismatch"), "price_mismatch", "{}"));
+        pend.Items.Add(new PendingRow("sale-2", "Venda", "17/10/2026 18:10", "R$ 24,90", 2490, PendingViewModel.Reason("cash_not_open"), "cash_not_open", "{}"));
+        pend.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(pend, ["IsEmpty"]);
+        shell.ShowForPreview("pending", pend);
+        Save(window, Path.Combine(dir, "16-pendencias.png"));
+
+        var alerts = new AlertsViewModel(shell);
+        alerts.Items.Add(new AlertRow(Guid.NewGuid(), "Quebra de caixa: R$ 12,50", "Caixa de Carlos (Matriz) fechado com falta de R$ 12,50. Esperado R$ 1.032,40, contado R$ 1.019,90. Justificativa: troco errado.", "18/10/2026 18:31", true, Icons.Money));
+        alerts.Items.Add(new AlertRow(Guid.NewGuid(), "Estoque baixo: Toalha de rosto algodão", "Restam 3 unidade(s) de Toalha de rosto algodão (mínimo 5). Considere repor.", "18/10/2026 14:05", false, Icons.Box));
+        alerts.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(alerts, ["IsEmpty"]);
+        shell.ShowForPreview("alerts", alerts);
+        Save(window, Path.Combine(dir, "17-avisos.png"));
 
         window.Close();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

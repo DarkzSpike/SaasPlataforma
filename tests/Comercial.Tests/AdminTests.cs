@@ -52,7 +52,7 @@ public class AdminTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyncLifetim
     [Fact]
     public async Task Modulo_planejado_nao_pode_ser_habilitado()
     {
-        var res = await api.Post($"/admin/v1/tenants/{T.Id}/modules/crm/enable", admin, Change(), api.Reauth());
+        var res = await api.Post($"/admin/v1/tenants/{T.Id}/modules/ecommerce/enable", admin, Change(), api.Reauth());
         Assert.Equal("module_change_blocked", await Api.Code(res));
     }
 

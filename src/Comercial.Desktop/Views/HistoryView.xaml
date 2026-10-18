@@ -4,7 +4,11 @@
              xmlns:local="clr-namespace:Comercial.Desktop">
     <DockPanel>
         <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
-        <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Foreground="{DynamicResource TextBrush}" FontSize="15" Margin="0,0,0,12"/>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE896;" Content="Exportar CSV" Height="36" Command="{Binding ExportCommand}"
+                    Visibility="{Binding CanExport, Converter={StaticResource Vis}}"/>
+            <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource TextBrush}" FontSize="15" VerticalAlignment="Center"/>
+        </DockPanel>
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="3*"/>
@@ -53,8 +57,12 @@
                     <DockPanel Visibility="{Binding HasSelection, Converter={StaticResource Vis}}">
                         <TextBlock DockPanel.Dock="Top" Text="{Binding DetailTitle}" Foreground="White" FontSize="18" FontWeight="Bold"/>
                         <TextBlock DockPanel.Dock="Top" Text="{Binding DetailInfo}" Style="{StaticResource Muted}" Margin="0,6,0,14"/>
-                        <Button DockPanel.Dock="Bottom" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE711;" Content="Cancelar venda" Margin="0,14,0,0"
-                                Foreground="{DynamicResource DangerBrush}" Command="{Binding CancelSaleCommand}"/>
+                        <UniformGrid DockPanel.Dock="Bottom" Rows="1" Margin="0,14,0,0">
+                            <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE749;" Content="Reimprimir" Margin="0,0,6,0" Padding="8,0" Command="{Binding ReprintCommand}"/>
+                            <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE7A7;" Content="Devolver itens" Margin="3,0" Padding="8,0" Command="{Binding ReturnCommand}"/>
+                            <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE711;" Content="Cancelar venda" Margin="6,0,0,0" Padding="8,0"
+                                    Foreground="{DynamicResource DangerBrush}" Command="{Binding CancelSaleCommand}"/>
+                        </UniformGrid>
                         <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Detail}" RowHeight="38" AutomationProperties.Name="Itens da venda selecionada">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*"/>

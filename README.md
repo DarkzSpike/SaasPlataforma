@@ -17,7 +17,7 @@ o que **não** foi, e os riscos pendentes.
 | `src/Comercial.Desktop.Core` | SQLite local, fila offline, verificação de licença, sincronização | compilado + testado |
 | `src/Comercial.Desktop` | Aplicativo Windows WPF (MVVM) | compilado; abre sem erro; fluxo de tela não automatizado |
 | `mobile/` | App Flutter Android/iOS | **código-fonte não compilado** (sem Flutter SDK) |
-| `tests/Comercial.Tests` | 76 testes de integração/segurança | 76/76 aprovados |
+| `tests/Comercial.Tests` | 104 testes de integração/segurança | SQLite 100 + 4 ignorados; PostgreSQL 103 + 1 ignorado |
 | `deploy/postgres` | SQL de migração, RLS, backup/restore | **não executados** (sem PostgreSQL) |
 
 ## Rodar localmente (desenvolvimento)
@@ -27,7 +27,7 @@ Requisitos: .NET SDK 10, Node (apenas para gerar o código TOTP de dev).
 dotnet test Comercial.sln
 ```
 
-API e painel (SQLite local, segredos de dev em `dev/dev-secrets.local.json`, ignorado pelo git):
+API e painel (PostgreSQL local `comercial_dev`; `dev/run-api.ps1 -Sqlite` para SQLite; segredos de dev em `dev/dev-secrets.local.json`, ignorado pelo git):
 ```bash
 powershell -File dev/run-api.ps1
 ```

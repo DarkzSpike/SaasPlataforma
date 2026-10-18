@@ -10,6 +10,10 @@ public static class OutboxStatus
     public const string Synced = "synced";
     /// <summary>Recusada pelo servidor: fica guardada para revisão/conciliação, nunca é descartada.</summary>
     public const string Rejected = "rejected";
+    /// <summary>Recusada e depois registrada novamente (com preço atual) por um gerente.</summary>
+    public const string Resolved = "resolved";
+    /// <summary>Recusada e descartada por um gerente, com motivo registrado na auditoria do servidor.</summary>
+    public const string Discarded = "discarded";
 }
 
 /// <summary>
@@ -152,6 +156,16 @@ public sealed class LocalDatabase
         using var r = cmd.ExecuteReader();
         while (r.Read()) list.Add((Guid.Parse(r.GetString(0)), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.GetString(3), r.GetInt64(4)));
         return list;
+    }
+
+    public (string Name, long PriceCents)? GetProduct(Guid id)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT name,price_cents FROM products WHERE id=$i";
+        cmd.Parameters.AddWithValue("$i", id.ToString());
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? (r.GetString(0), r.GetInt64(1)) : null;
     }
 
     public (Guid Id, string Name, long PriceCents)? FindProduct(string code)

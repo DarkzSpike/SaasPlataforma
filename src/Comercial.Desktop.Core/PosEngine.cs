@@ -16,7 +16,8 @@ public sealed class PosEngine(LocalDatabase db, LicenseGuard license, TimeProvid
 {
     public const string PdvModule = "pdv";
 
-    public string RecordSale(Guid storeId, Guid cashSessionId, IReadOnlyList<CartLine> cart, IReadOnlyList<SalePaymentRequest> payments, long saleDiscountCents = 0)
+    public string RecordSale(Guid storeId, Guid cashSessionId, IReadOnlyList<CartLine> cart, IReadOnlyList<SalePaymentRequest> payments, long saleDiscountCents = 0,
+        Guid? customerId = null, int redeemPoints = 0)
     {
         var now = clock.GetUtcNow();
         var check = license.Evaluate(now);
@@ -27,7 +28,7 @@ public sealed class PosEngine(LocalDatabase db, LicenseGuard license, TimeProvid
         var key = "sale-" + Guid.NewGuid().ToString("N");
         var req = new CreateSaleRequest(key, storeId, cashSessionId, now,
             cart.Select(c => new SaleItemRequest(c.ProductId, c.Quantity, 0, c.UnitPriceCents)).ToList(),
-            payments.ToList(), saleDiscountCents, null, true);
+            payments.ToList(), saleDiscountCents, null, true, customerId, redeemPoints);
         db.Enqueue(key, SyncTypes.SaleCreate, JsonSerializer.Serialize(req, ApiClient.Json), now);
         return key;
     }
