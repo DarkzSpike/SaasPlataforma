@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest   # necessário para compilar o cliente WPF
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restaurar
+        run: dotnet restore Comercial.sln
+      - name: Compilar (avisos como erro)
+        run: dotnet build Comercial.sln --no-restore -c Release -warnaserror
+      - name: Testes (unitários, integração e segurança)
+        run: dotnet test Comercial.sln --no-build -c Release --logger trx
+      - name: Dependências vulneráveis
+        shell: pwsh
+        run: |
+          $out = dotnet list Comercial.sln package --vulnerable --include-transitive 2>&1
+          $out
+          if ($out -match 'tem os seguintes pacotes vulneráveis|has the following vulnerable packages') { exit 1 }
+      - name: Migração PostgreSQL é gerável
+        run: |
+          dotnet tool restore
+          dotnet ef migrations script --idempotent --project src/Comercial.Infrastructure --startup-project src/Comercial.Infrastructure -o migration.sql
+
+  postgres-integration:
+    # Suíte completa contra PostgreSQL real com RLS, usuário app_comercial e pg_dump/pg_restore.
+    # A versão do servidor deve ser <= à do cliente pg_dump do runner (ubuntu-24.04 traz o 16).
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Aplicar migração e RLS
+        env:
+          PGPASSWORD: ci-only
+        run: |
+          dotnet tool restore
+          dotnet ef migrations script --idempotent --project src/Comercial.Infrastructure --startup-project src/Comercial.Infrastructure -o migration.sql
+          psql -h localhost -U postgres -c "CREATE DATABASE comercial"
+          psql -h localhost -U postgres -d comercial -v ON_ERROR_STOP=1 -f migration.sql
+          psql -h localhost -U postgres -d comercial -v ON_ERROR_STOP=1 -f deploy/postgres/002_seguranca_rls.sql
+      - name: Testes contra PostgreSQL (o WPF não compila no Linux; só o projeto de testes)
+        env:
+          COMERCIAL_TEST_PG: Host=localhost;Port=5432;Username=postgres;Password=ci-only
+        run: dotnet test tests/Comercial.Tests -c Release

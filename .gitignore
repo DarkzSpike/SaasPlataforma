@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+dev-data/
+*.local.json
+*.db
+*.db-shm
+*.db-wal
+mobile/.dart_tool/
+mobile/build/

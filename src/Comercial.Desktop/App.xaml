@@ -1,0 +1,131 @@
+﻿<Application x:Class="Comercial.Desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Comercial.Desktop"
+             xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <!-- Valores padrão; substituídos pela identidade visual publicada da empresa (AppServices.ApplyBranding). -->
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#1F5EFF"/>
+        <SolidColorBrush x:Key="SecondaryBrush" Color="#0F2A5C"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#FFB020"/>
+        <SolidColorBrush x:Key="BackgroundBrush" Color="#F6F8FB"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#14181F"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#D9DEE7"/>
+        <FontFamily x:Key="AppFont">Segoe UI</FontFamily>
+        <sys:Double x:Key="BaseFontSize">14</sys:Double>
+        <CornerRadius x:Key="ButtonRadius">6</CornerRadius>
+        <sys:String x:Key="SystemName">Gestão Comercial</sys:String>
+
+        <Style TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="{DynamicResource ButtonRadius}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
+        </Style>
+
+        <DataTemplate DataType="{x:Type local:LoginViewModel}">
+            <Grid Background="{DynamicResource BackgroundBrush}">
+                <Border Width="380" VerticalAlignment="Center" Padding="28" Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource SystemName}" FontSize="22" FontWeight="SemiBold" Margin="4,0,4,16"/>
+                        <TextBlock Text="Código da empresa" Margin="4,0"/>
+                        <TextBox Text="{Binding TenantCode, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Text="E-mail" Margin="4,8,4,0"/>
+                        <TextBox Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Text="Senha" Margin="4,8,4,0"/>
+                        <PasswordBox x:Name="Pwd"/>
+                        <Button Content="Entrar" Margin="4,16,4,4" Command="{Binding LoginCommand}" CommandParameter="{Binding ElementName=Pwd}" IsDefault="True"/>
+                        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="4,8" Foreground="{DynamicResource SecondaryBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type local:PosViewModel}">
+            <DockPanel Background="{DynamicResource BackgroundBrush}">
+                <Border DockPanel.Dock="Top" Background="{DynamicResource SecondaryBrush}" Padding="16,10">
+                    <DockPanel>
+                        <TextBlock Text="{DynamicResource SystemName}" Foreground="White" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding CashText}" Foreground="White" HorizontalAlignment="Right"/>
+                    </DockPanel>
+                </Border>
+                <Border DockPanel.Dock="Bottom" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,6">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Status}"/>
+                        <TextBlock Text="{Binding LicenseText}" Opacity="0.75"/>
+                        <TextBlock Text="{Binding SyncText}" Opacity="0.75"/>
+                    </StackPanel>
+                </Border>
+                <StackPanel DockPanel.Dock="Right" Width="280" Margin="12">
+                    <TextBlock Text="Total" FontSize="16"/>
+                    <TextBlock Text="{Binding TotalText}" FontSize="36" FontWeight="Bold" Foreground="{DynamicResource PrimaryBrush}"/>
+                    <TextBlock Text="Forma de pagamento" Margin="4,12,4,0"/>
+                    <ComboBox SelectedValue="{Binding Method}" SelectedValuePath="Tag" Margin="4">
+                        <ComboBoxItem Tag="1" Content="Dinheiro"/>
+                        <ComboBoxItem Tag="2" Content="Débito"/>
+                        <ComboBoxItem Tag="3" Content="Crédito"/>
+                        <ComboBoxItem Tag="4" Content="PIX"/>
+                    </ComboBox>
+                    <TextBlock Text="Valor recebido (R$)" Margin="4,8,4,0"/>
+                    <TextBox Text="{Binding Paid, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Content="Finalizar venda (F10)" Command="{Binding FinishCommand}" Background="{DynamicResource AccentBrush}"/>
+                    <Button Content="Limpar" Command="{Binding ClearCommand}" Background="{DynamicResource SecondaryBrush}"/>
+                    <Separator Margin="4,12"/>
+                    <Button Content="Abrir caixa" Command="{Binding OpenCashCommand}"/>
+                    <Button Content="Fechar caixa" Command="{Binding CloseCashCommand}"/>
+                    <Button Content="Abrir loja" Command="{Binding OpenStoreCommand}"/>
+                    <Button Content="Fechar loja" Command="{Binding CloseStoreCommand}"/>
+                    <Button Content="Sincronizar agora" Command="{Binding SyncCommand}" Background="{DynamicResource SecondaryBrush}"/>
+                </StackPanel>
+                <DockPanel Margin="12">
+                    <DockPanel DockPanel.Dock="Top">
+                        <Button DockPanel.Dock="Right" Content="Adicionar" Command="{Binding AddCommand}" IsDefault="True"/>
+                        <TextBox Text="{Binding Code, UpdateSourceTrigger=PropertyChanged}" ToolTip="Código de barras ou SKU. Quantidade: 3*789..."/>
+                    </DockPanel>
+                    <DataGrid ItemsSource="{Binding Cart}" AutoGenerateColumns="False" IsReadOnly="True" Margin="4" HeadersVisibility="Column"
+                              Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="Qtd" Binding="{Binding Quantity}" Width="80"/>
+                            <DataGridTextColumn Header="Unitário" Binding="{Binding Unit}" Width="110"/>
+                            <DataGridTextColumn Header="Total" Binding="{Binding Total}" Width="110"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </DockPanel>
+        </DataTemplate>
+    </Application.Resources>
+</Application>
