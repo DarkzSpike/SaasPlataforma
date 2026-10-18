@@ -11,6 +11,14 @@ $common = @("--Bootstrap:AdminEmail=$($s.AdminEmail)", "--Bootstrap:AdminPasswor
             "--Payments:generic:WebhookSecret=$($s.WebhookSecret)")
 Set-Location (Join-Path $root 'src/Comercial.Api')
 
+# Uma API já aberta (outro terminal) trava as DLLs e a porta 5080: encerra antes de compilar.
+$old = Get-Process Comercial.Api -ErrorAction SilentlyContinue
+if ($old) {
+  Write-Host "Encerrando API que ja estava rodando (PID $($old.Id -join ', '))..."
+  $old | Stop-Process -Force
+  $old | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+}
+
 if ($Sqlite) {
   dotnet run --no-launch-profile -- --environment Development --urls http://localhost:5080 @common
   exit
@@ -18,12 +26,13 @@ if ($Sqlite) {
 
 $psql = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
 $env:PGHOST = 'localhost'; $env:PGUSER = 'postgres'; $env:PGPASSWORD = $s.PostgresSuperPassword
+$env:PGOPTIONS = '-c client_min_messages=warning'   # esconde avisos "já existe, ignorando" dos scripts idempotentes
 $db = 'comercial_dev'
 if (-not (& $psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$db'")) { & $psql -d postgres -q -c "CREATE DATABASE $db" }
 & $psql -d $db -q -v ON_ERROR_STOP=1 -f (Join-Path $root 'deploy/postgres/001_inicial.sql') | Out-Null
 & $psql -d $db -q -v ON_ERROR_STOP=1 -f (Join-Path $root 'deploy/postgres/002_seguranca_rls.sql') | Out-Null
 & $psql -d $db -q -c "ALTER ROLE app_comercial PASSWORD '$($s.AppDbPassword)'" | Out-Null
-Remove-Item Env:PGPASSWORD
+Remove-Item Env:PGPASSWORD, Env:PGOPTIONS
 
 dotnet run --no-launch-profile -- --environment Development --urls http://localhost:5080 `
   --Database:Provider=Postgres "--ConnectionStrings:Main=Host=localhost;Database=$db;Username=app_comercial;Password=$($s.AppDbPassword)" @common

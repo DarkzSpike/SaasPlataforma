@@ -111,6 +111,12 @@ public sealed class DashboardViewModel(ShellViewModel shell) : OwnerPage(shell, 
         Kpis.Add(new Kpi("Vendas no mês", AppServices.Money(d.GetProperty("monthRevenueCents").GetInt64()), $"{d.GetProperty("monthSalesCount").GetInt32()} venda(s)", "\uE787", "accent"));
         if (Opt("monthGrossProfitCents") is { } mp) Kpis.Add(new Kpi("Lucro bruto no mês", AppServices.Money(mp), "estimado (sem despesas)", "\uE8C7", "primary"));
         Kpis.Add(new Kpi("Caixas abertos", d.GetProperty("openCashSessions").GetInt32().ToString(), "agora", Icons.Bank, "neutral"));
+        var shortToday = d.GetProperty("todayCashShortageCents").GetInt64();
+        var shortMonth = d.GetProperty("monthCashShortageCents").GetInt64();
+        var shortCount = d.GetProperty("monthCashShortageCount").GetInt32();
+        Kpis.Add(new Kpi("Quebra de caixa", AppServices.Money(shortMonth),
+            shortCount == 0 ? "nenhuma falta no mês" : $"hoje {AppServices.Money(shortToday)} · {shortCount} fechamento(s) no mês",
+            Icons.Money, shortMonth > 0 ? "danger" : "neutral"));
         var low = d.GetProperty("lowStockProducts").GetInt32();
         Kpis.Add(new Kpi("Estoque baixo", low.ToString(), low == 0 ? "tudo certo" : "produto(s) para repor", "\uE7B8", low == 0 ? "neutral" : "warn"));
         Note = d.GetProperty("note").GetString() ?? "";

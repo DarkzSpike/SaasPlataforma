@@ -15,12 +15,16 @@
                         <DataGridTextColumn Header="Quando" Binding="{Binding When}" Width="150"/>
                         <DataGridTextColumn Header="Tipo" Binding="{Binding Type}" Width="170"/>
                         <DataGridTextColumn Header="Valor cobrado" Binding="{Binding Total}" Width="130"/>
-                        <DataGridTextColumn Header="Motivo da recusa" Binding="{Binding Reason}" Width="*"/>
+                        <DataGridTemplateColumn Header="Motivo da recusa" Width="*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Reason}" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" ToolTip="{Binding ErrorCode}"/></DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                         <DataGridTemplateColumn Header="Decisão" Width="290">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal">
-                                        <Button Style="{StaticResource PrimaryButton}" Content="Reenviar" Height="36" Padding="14,0" Margin="0,0,8,0"
+                                        <Button Style="{StaticResource PrimaryButton}" Content="Reenviar" Height="36" Padding="14,0" Margin="0,0,8,0" Visibility="{Binding CanResend, Converter={StaticResource Vis}}"
                                                 Command="{Binding DataContext.ResendCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
                                         <Button Style="{StaticResource DarkButton}" Content="Descartar" Height="36" Padding="14,0" Foreground="{DynamicResource DangerBrush}"
                                                 Command="{Binding DataContext.DiscardCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>

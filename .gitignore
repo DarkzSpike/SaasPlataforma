@@ -10,3 +10,4 @@ dev-data/
 *.db-wal
 mobile/.dart_tool/
 mobile/build/
+*.local.txt

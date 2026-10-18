@@ -99,6 +99,10 @@ public class StockAndNotificationTests(ApiFactory f) : IClassFixture<ApiFactory>
         Assert.Contains("faltou troco", n.GetProperty("body").GetString());
         Assert.Equal(PushStatus.NoProvider, n.GetProperty("pushStatus").GetString()); // sem Firebase configurado: só no app
 
+        var dash = await Api.Expect(await api.Get("/api/v1/mobile/dashboard", T.OwnerToken), HttpStatusCode.OK);
+        Assert.True(dash.GetProperty("monthCashShortageCents").GetInt64() >= 250);
+        Assert.True(dash.GetProperty("todayCashShortageCount").GetInt32() >= 1);
+
         Assert.Equal(0, (await Api.Expect(await api.Get("/api/v1/notifications", op), HttpStatusCode.OK)).GetArrayLength());
         var other = await api.CreateTenant("ntf-" + Guid.NewGuid().ToString("N")[..6]);
         Assert.Equal(0, (await Api.Expect(await api.Get("/api/v1/notifications", other.OwnerToken), HttpStatusCode.OK)).GetArrayLength());

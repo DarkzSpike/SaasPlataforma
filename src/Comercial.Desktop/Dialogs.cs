@@ -13,8 +13,8 @@ public sealed class SaleDoneViewModel(long totalCents, long paidCents, string me
 {
     public Receipt? Receipt { get; } = receipt;
     public bool CanPrint => Receipt is not null;
-    public RelayCommand PrintCommand { get; } = RelayCommand.Sync(_ => { if (receipt is not null) ReceiptPrinter.Print(receipt); });
-    public string PointsText => receipt is { PointsEarned: > 0 } r ? $"Cliente ganhou {r.PointsEarned} ponto(s)" : "";
+    public RelayCommand PrintCommand { get; } = RelayCommand.Sync(_ => { if (receipt is { } r) ReceiptPrinter.Print(r); });
+    public string PointsText => Receipt is { PointsEarned: > 0 } r ? $"Cliente ganhou {r.PointsEarned} ponto(s)" : "";
     public long ChangeCents => paidCents - totalCents;
     public bool HasChange => ChangeCents > 0;
     public string ChangeText => AppServices.Money(ChangeCents);

@@ -28,7 +28,7 @@ public sealed class BoolToVisibility : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
-/// <summary>Tom do indicador (primary/accent/warn/neutral) → recurso de cor.</summary>
+/// <summary>Tom do indicador (primary/accent/warn/danger/neutral) → recurso de cor.</summary>
 public sealed class ToneToBrush : IValueConverter
 {
     public object? Convert(object? value, Type t, object? p, CultureInfo c) => (value as string) switch
@@ -36,6 +36,7 @@ public sealed class ToneToBrush : IValueConverter
         "primary" => Application.Current.Resources["PrimaryBrush"],
         "accent" => Application.Current.Resources["AccentBrush"],
         "warn" => Application.Current.Resources["WarnBrush"],
+        "danger" => Application.Current.Resources["DangerBrush"],
         _ => Application.Current.Resources["MutedBrush"],
     };
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();

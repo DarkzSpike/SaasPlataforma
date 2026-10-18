@@ -402,6 +402,10 @@ public static class TenantEndpoints
             var lowStock = await (from b in db.StockBalances join p in db.Products on b.ProductId equals p.Id where b.Quantity <= p.MinStock && p.IsActive select b.ProductId).CountAsync();
             var devices = await db.Devices.AsNoTracking().Where(d => d.Status == DeviceStatus.Active).Select(d => new { d.Id, d.Name, d.LastSyncAt, d.AppVersion }).ToListAsync();
             var openCash = await db.CashSessions.AsNoTracking().CountAsync(c => c.Status == CashSessionStatus.Open);
+            // Quebra de caixa: fechamentos do mês em que o dinheiro contado ficou abaixo do esperado.
+            var shortages = await db.CashSessions.AsNoTracking()
+                .Where(c => c.Status != CashSessionStatus.Open && c.ClosedAt >= month && c.DifferenceCents < 0)
+                .Select(c => new { c.ClosedAt, c.DifferenceCents }).ToListAsync();
             return Results.Ok(new
             {
                 generatedAt = now,
@@ -413,6 +417,10 @@ public static class TenantEndpoints
                 monthGrossProfitCents = monthProfit,
                 timeZone = tz.Id,
                 openCashSessions = openCash,
+                todayCashShortageCents = shortages.Where(c => c.ClosedAt >= today).Sum(c => -c.DifferenceCents!.Value),
+                todayCashShortageCount = shortages.Count(c => c.ClosedAt >= today),
+                monthCashShortageCents = shortages.Sum(c => -c.DifferenceCents!.Value),
+                monthCashShortageCount = shortages.Count,
                 lowStockProducts = lowStock,
                 license = await f.LicenseStateAsync(),
                 devices,

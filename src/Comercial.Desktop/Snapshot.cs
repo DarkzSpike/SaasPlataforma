@@ -66,6 +66,7 @@ public static class Snapshot
         dash.Kpis.Add(new Kpi("Vendas no mês", "R$ 21.940,30", "612 venda(s)", "\uE787", "accent"));
         dash.Kpis.Add(new Kpi("Lucro bruto no mês", "R$ 10.112,80", "estimado (sem despesas)", "\uE8C7", "primary"));
         dash.Kpis.Add(new Kpi("Caixas abertos", "1", "agora", Icons.Bank, "neutral"));
+        dash.Kpis.Add(new Kpi("Quebra de caixa", "R$ 37,50", "hoje R$ 12,50 · 2 fechamento(s) no mês", Icons.Money, "danger"));
         dash.Kpis.Add(new Kpi("Estoque baixo", "2", "produto(s) para repor", "\uE7B8", "warn"));
         var rnd = new Random(7);
         foreach (var b in OwnerPage.BuildBars(Enumerable.Range(0, 14).Select(i =>
@@ -222,8 +223,8 @@ public static class Snapshot
         Save(window, Path.Combine(dir, "15-financeiro.png"));
 
         var pend = new PendingViewModel(shell);
-        pend.Items.Add(new PendingRow("sale-1", "Venda", "17/10/2026 19:42", "R$ 49,80", 4980, PendingViewModel.Reason("price_mismatch"), "price_mismatch", "{}"));
-        pend.Items.Add(new PendingRow("sale-2", "Venda", "17/10/2026 18:10", "R$ 24,90", 2490, PendingViewModel.Reason("cash_not_open"), "cash_not_open", "{}"));
+        pend.Items.Add(new PendingRow("sale-1", "Venda", "17/10/2026 19:42", "R$ 49,80", 4980, PendingViewModel.Reason("price_mismatch"), "price_mismatch", "{}", true));
+        pend.Items.Add(new PendingRow("sale-2", "Venda", "17/10/2026 18:10", "R$ 24,90", 2490, PendingViewModel.Reason("cash_not_open"), "cash_not_open", "{}", true));
         pend.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(pend, ["IsEmpty"]);
         shell.ShowForPreview("pending", pend);
         Save(window, Path.Combine(dir, "16-pendencias.png"));

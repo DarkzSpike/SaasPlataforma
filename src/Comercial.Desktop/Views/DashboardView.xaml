@@ -5,7 +5,7 @@
         <StackPanel>
             <ContentControl Style="{StaticResource PageHeader}"/>
             <ItemsControl ItemsSource="{Binding Kpis}" ItemTemplate="{StaticResource KpiTemplate}">
-                <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="4"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
             </ItemsControl>
             <Grid>
                 <Grid.ColumnDefinitions>

@@ -25,7 +25,7 @@ public sealed class OrderLine(Guid itemId, string product, decimal ordered, deci
     public decimal Pending => Math.Max(0, Ordered - Received);
     public string OrderedText => Ordered.ToString("0.###", AppServices.PtBr);
     public string ReceivedText => Received.ToString("0.###", AppServices.PtBr);
-    public string Cost => AppServices.Money(costCents);
+    public string Cost => AppServices.Money(CostCents);
     public long CostCents { get; } = costCents;
     public string ReceiveQty { get => _receive; set => Set(ref _receive, value); }
     public string ReceiveCost { get => _cost; set => Set(ref _cost, value); }
@@ -527,7 +527,7 @@ public sealed class FinanceViewModel : OwnerPage
 
 // ============================== Pendências (vendas offline recusadas) ==============================
 
-public sealed record PendingRow(string Key, string Type, string When, string Total, long TotalCents, string Reason, string ErrorCode, string PayloadJson);
+public sealed record PendingRow(string Key, string Type, string When, string Total, long TotalCents, string Reason, string ErrorCode, string PayloadJson, bool CanResend);
 
 /// <summary>
 /// Conciliação: vendas feitas offline que o servidor recusou (ex.: preço mudou, caixa já fechado).
@@ -546,6 +546,8 @@ public sealed class PendingViewModel(ShellViewModel shell) : OwnerPage(shell, "P
         "cash_not_open" => "Caixa já estava fechado no servidor",
         "not_owner" => "Caixa pertence a outro operador",
         "product_not_found" => "Produto removido do catálogo",
+        "store_not_found" => "Loja não existe mais no servidor (dado de instalação/empresa anterior)",
+        "cash_session_not_found" => "Caixa não existe mais no servidor",
         "insufficient_points" => "Cliente sem pontos suficientes",
         "clock_in_future" => "Relógio do computador adiantado",
         "license_restricted" => "Licença restrita na data da venda",
@@ -560,15 +562,33 @@ public sealed class PendingViewModel(ShellViewModel shell) : OwnerPage(shell, "P
             long total = 0;
             if (i.Type == SyncTypes.SaleCreate && JsonSerializer.Deserialize<CreateSaleRequest>(i.PayloadJson, ApiClient.Json) is { } sale)
                 total = sale.Items.Sum(x => (long)Math.Round((x.ClientUnitPriceCents ?? 0) * x.Quantity) - x.DiscountCents) - sale.SaleDiscountCents;
+            // Operação de outra loja (ex.: terminal reativado em outra empresa) ou cuja loja/produto sumiu: só pode ser descartada.
+            var otherStore = StoreOf(i.PayloadJson) is { } sid && sid != S.Settings.StoreId;
+            var orphan = otherStore || i.LastError is "store_not_found" or "product_not_found" or "cash_session_not_found";
+            var reason = otherStore && i.LastError != "store_not_found" ? "Feita em outra loja/instalação anterior deste terminal" : Reason(i.LastError);
             Items.Add(new PendingRow(i.IdempotencyKey, i.Type == SyncTypes.SaleCreate ? "Venda" : "Abertura/fechamento", i.LocalTime.LocalDateTime.ToString("dd/MM/yyyy HH:mm"),
-                total > 0 ? AppServices.Money(total) : "—", total, Reason(i.LastError), i.LastError ?? "", i.PayloadJson));
+                total > 0 ? AppServices.Money(total) : "—", total, orphan ? reason + " — só é possível descartar" : reason, i.LastError ?? "", i.PayloadJson,
+                CanResend: i.Type == SyncTypes.SaleCreate && !orphan));
         }
         Raise(nameof(IsEmpty));
         return Task.CompletedTask;
     }
 
+    private static Guid? StoreOf(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+                if (prop.Name.Equals("storeId", StringComparison.OrdinalIgnoreCase) && prop.Value.TryGetGuid(out var g)) return g;
+        }
+        catch (JsonException) { }
+        return null;
+    }
+
     private void Resend(PendingRow row)
     {
+        if (!row.CanResend) { Error = "Esta operação não pode ser reenviada: só é possível descartar."; return; }
         if (row.Type != "Venda") { Error = "Eventos de abertura/fechamento recusados só podem ser descartados (registre o horário correto em Horários)."; return; }
         var sale = JsonSerializer.Deserialize<CreateSaleRequest>(row.PayloadJson, ApiClient.Json)!;
         long newSubtotal = 0;
