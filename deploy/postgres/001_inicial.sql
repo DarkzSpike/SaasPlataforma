@@ -1032,3 +1032,103 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    ALTER TABLE products ADD "ImageContentType" character varying(40);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    ALTER TABLE products ADD "ImageKey" character varying(300);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    ALTER TABLE products ADD "ImageUpdatedAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    CREATE TABLE notifications (
+        "Id" uuid NOT NULL,
+        "Type" text NOT NULL,
+        "Title" character varying(200) NOT NULL,
+        "Body" character varying(1000) NOT NULL,
+        "DataJson" text,
+        "TargetRole" text NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ReadAt" timestamp with time zone,
+        "PushStatus" text NOT NULL,
+        "PushAttempts" integer NOT NULL,
+        "PushedAt" timestamp with time zone,
+        "LastPushError" text,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_notifications" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_notifications_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    CREATE TABLE push_tokens (
+        "Id" uuid NOT NULL,
+        "UserId" uuid NOT NULL,
+        "Token" character varying(512) NOT NULL,
+        "Platform" text NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "LastSeenAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_push_tokens" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_push_tokens_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    CREATE INDEX "IX_notifications_PushStatus" ON notifications ("PushStatus");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    CREATE INDEX "IX_notifications_TenantId_CreatedAt" ON notifications ("TenantId", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    CREATE UNIQUE INDEX "IX_push_tokens_TenantId_Token" ON push_tokens ("TenantId", "Token");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    CREATE INDEX "IX_push_tokens_TenantId_UserId" ON push_tokens ("TenantId", "UserId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018101902_FotosInventarioAvisos') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261018101902_FotosInventarioAvisos', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+

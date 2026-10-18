@@ -3,7 +3,10 @@ import 'package:intl/intl.dart';
 
 import 'core/api_client.dart';
 import 'core/branding.dart';
+import 'core/push.dart';
 import 'core/session_store.dart';
+import 'features/notifications.dart';
+import 'features/products.dart';
 
 /// URL da API definida no build: flutter run --dart-define=API_BASE_URL=https://api.exemplo.com.br
 const apiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:5080');
@@ -25,7 +28,10 @@ class _ComercialAppState extends State<ComercialApp> {
   void initState() {
     super.initState();
     api.tryRestore().then((ok) async {
-      if (ok) await _loadBranding();
+      if (ok) {
+        await _loadBranding();
+        PushRegistration.register(api);
+      }
       setState(() => loggedIn = ok);
     });
   }
@@ -42,6 +48,7 @@ class _ComercialAppState extends State<ComercialApp> {
   Future<void> _onLoggedIn() async {
     setState(() => branding = Branding.fallback()); // limpa a identidade anterior antes de carregar a nova
     await _loadBranding();
+    PushRegistration.register(api); // aviso de quebra de caixa no celular do dono
     setState(() => loggedIn = true);
   }
 
@@ -68,8 +75,55 @@ class _ComercialAppState extends State<ComercialApp> {
       home: switch (loggedIn) {
         null => const Scaffold(body: Center(child: CircularProgressIndicator())),
         false => LoginPage(api: api, branding: branding, onLoggedIn: _onLoggedIn),
-        true => DashboardPage(api: api, branding: branding, onLogout: _onLogout),
+        true => HomeShell(api: api, branding: branding, onLogout: _onLogout),
       },
+    );
+  }
+}
+
+/// Navegação principal do app do dono: Painel, Estoque (com cadastro pela câmera) e Avisos.
+class HomeShell extends StatefulWidget {
+  const HomeShell({super.key, required this.api, required this.branding, required this.onLogout});
+  final ApiClient api;
+  final Branding branding;
+  final Future<void> Function() onLogout;
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  int index = 0;
+  String? storeId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.api.getList('/api/v1/stores').then((s) {
+      if (s.isNotEmpty) setState(() => storeId = (s.first as Map<String, dynamic>)['id'] as String);
+    }).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = <Widget>[
+      DashboardPage(api: widget.api, branding: widget.branding, onLogout: widget.onLogout),
+      Scaffold(
+        appBar: AppBar(title: const Text('Estoque')),
+        body: storeId == null ? const Center(child: CircularProgressIndicator()) : ProductsPage(api: widget.api, storeId: storeId!),
+      ),
+      Scaffold(appBar: AppBar(title: const Text('Avisos')), body: NotificationsPage(api: widget.api)),
+    ];
+    return Scaffold(
+      body: IndexedStack(index: index, children: pages),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: index,
+        onDestinationSelected: (i) => setState(() => index = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Painel'),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Estoque'),
+          NavigationDestination(icon: Icon(Icons.notifications_outlined), label: 'Avisos'),
+        ],
+      ),
     );
   }
 }

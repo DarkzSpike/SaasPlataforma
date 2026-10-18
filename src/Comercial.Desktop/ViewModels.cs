@@ -157,6 +157,27 @@ public sealed class ShellViewModel : ObservableObject
     public NavItem SelectedNav { get => _selected; set { if (Set(ref _selected, value)) Navigate(value); } }
     public object Page { get => _page; set => Set(ref _page, value); }
     public PromptViewModel? Prompt { get => _prompt; set => Set(ref _prompt, value); }
+    private SaleDoneViewModel? _saleDone;
+    private FormViewModel? _form;
+    public SaleDoneViewModel? SaleDone { get => _saleDone; set => Set(ref _saleDone, value); }
+    public FormViewModel? Form { get => _form; set => Set(ref _form, value); }
+
+    public void ShowSaleDone(long total, long paid, string method) =>
+        SaleDone = new SaleDoneViewModel(total, paid, method, () => SaleDone = null);
+
+    public void ShowForm(FormViewModel f, Func<FormViewModel, Task<bool>> onConfirm)
+    {
+        f.CancelCommand = RelayCommand.Sync(_ => Form = null);
+        f.ConfirmCommand = new RelayCommand(async _ =>
+        {
+            f.Busy = true; f.Error = "";
+            try { if (await onConfirm(f)) Form = null; }
+            catch (ApiException ex) { f.Error = "Não foi possível salvar: " + ex.Code; }
+            catch (System.Net.Http.HttpRequestException) { f.Error = "Sem conexão com o servidor."; }
+            finally { f.Busy = false; }
+        });
+        Form = f;
+    }
     public string LicenseText { get => _licenseText; set => Set(ref _licenseText, value); }
     public bool LicenseOk { get => _licenseOk; set => Set(ref _licenseOk, value); }
     public string SyncText { get => _syncText; set => Set(ref _syncText, value); }
@@ -171,12 +192,12 @@ public sealed class ShellViewModel : ObservableObject
         UserLabel = userLabel;
         Pos = new PosViewModel(this, startTimers);
         var sess = S.Session;
-        Nav.Add(new NavItem("pos", "Vendas", ""));
-        if (sess.Can("reports.read", "app_proprietario")) Nav.Add(new NavItem("dashboard", "Painel", ""));
-        if (sess.Can("sales.read")) Nav.Add(new NavItem("history", "Histórico", ""));
-        if (sess.Can("reports.financial", "lucratividade")) Nav.Add(new NavItem("profit", "Lucro", ""));
-        if (sess.Can("stock.read", "estoque")) Nav.Add(new NavItem("stock", "Estoque", ""));
-        if (sess.Can("cash.review", "caixa")) Nav.Add(new NavItem("cash", "Caixas", ""));
+        Nav.Add(new NavItem("pos", "Vendas", "\uE7BF"));
+        if (sess.Can("reports.read", "app_proprietario")) Nav.Add(new NavItem("dashboard", "Painel", "\uE9D2"));
+        if (sess.Can("sales.read")) Nav.Add(new NavItem("history", "Histórico", "\uE81C"));
+        if (sess.Can("reports.financial", "lucratividade")) Nav.Add(new NavItem("profit", "Lucro", "\uE8C7"));
+        if (sess.Can("stock.read", "estoque")) Nav.Add(new NavItem("stock", "Estoque", "\uE7B8"));
+        if (sess.Can("cash.review", "caixa")) Nav.Add(new NavItem("cash", "Caixas", "\uE787"));
         _selected = Nav[0];
         _page = Pos;
         LogoutCommand = RelayCommand.Sync(_ => { Pos.Stop(); _main.Current = new LoginViewModel(_main); });
@@ -260,7 +281,7 @@ public sealed class PosViewModel : ObservableObject
     public ObservableCollection<CartItemVm> Cart { get; } = [];
     public ObservableCollection<ProductHit> Suggestions { get; } = [];
     public IReadOnlyList<PaymentOption> PaymentOptions { get; } =
-        [new(1, "Dinheiro", ""), new(2, "Cartão de débito", ""), new(3, "Cartão de crédito", ""), new(4, "PIX", "")];
+        [new(1, "Dinheiro", "\uE8C7"), new(2, "Cartão de débito", "\uE8C7"), new(3, "Cartão de crédito", "\uE8C7"), new(4, "PIX", "\uE8C7")];
     public string Code { get => _code; set { if (Set(ref _code, value)) Search(); } }
     public string Paid { get => _paid; set => Set(ref _paid, value); }
     public PaymentOption Method { get => _method; set => Set(ref _method, value); }
@@ -294,7 +315,7 @@ public sealed class PosViewModel : ObservableObject
         AddCommand = RelayCommand.Sync(_ => Add());
         ClearCommand = RelayCommand.Sync(_ => Cart.Clear(), _ => Cart.Count > 0);
         RemoveCommand = RelayCommand.Sync(p => { if (p is CartItemVm i) Cart.Remove(i); });
-        FinishCommand = RelayCommand.Sync(_ => Finish(), _ => Cart.Count > 0 && CashOpen);
+        FinishCommand = RelayCommand.Sync(_ => Finish(), _ => Cart.Count > 0 && CashOpen && _shell.SaleDone is null);
         OpenCashCommand = RelayCommand.Sync(_ => AskOpenCash(), _ => !CashOpen);
         CloseCashCommand = RelayCommand.Sync(_ => AskCloseCash(), _ => CashOpen);
         OpenStoreCommand = RelayCommand.Sync(_ => StoreEvent(true));
@@ -365,8 +386,9 @@ public sealed class PosViewModel : ObservableObject
         try
         {
             S.Pos!.RecordSale(S.Settings.StoreId!.Value, _cashSession!.Value, Cart.Select(c => c.Line).ToList(), [new SalePaymentRequest(Method.Method, paid)]);
-            Status = paid > total ? $"Venda registrada. Troco: {AppServices.Money(paid - total)}" : "Venda registrada.";
+            Status = "";
             Cart.Clear(); Paid = "";
+            _shell.ShowSaleDone(total, paid, Method.Name); // só fecha quando o operador confirmar o troco
             _ = SyncNowAsync();
         }
         catch (InvalidOperationException ex) { Status = ex.Message; }

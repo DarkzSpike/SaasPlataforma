@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import 'session_store.dart';
 
@@ -53,6 +54,27 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> get(String path) async => await _send('GET', path) as Map<String, dynamic>;
+  Future<List<dynamic>> getList(String path) async => await _send('GET', path) as List<dynamic>;
+  Future<dynamic> post(String path, Object body) => _send('POST', path, body: body);
+
+  /// Envia a foto do produto (multipart, campo "file"). O servidor valida o conteúdo real da imagem.
+  Future<void> uploadImage(String path, List<int> bytes, String fileName) async {
+    final req = http.MultipartRequest('POST', Uri.parse(baseUrl + path));
+    if (_access != null) req.headers['Authorization'] = 'Bearer $_access';
+    final type = fileName.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: fileName, contentType: MediaType('image', type)));
+    final res = await http.Response.fromStream(await _http.send(req).timeout(const Duration(seconds: 60)));
+    if (res.statusCode >= 400) {
+      final map = res.body.isEmpty ? const {} : jsonDecode(res.body) as Map;
+      throw ApiException(res.statusCode, (map['code'] ?? 'http_error') as String, (map['title'] ?? 'Erro ${res.statusCode}') as String);
+    }
+  }
+
+  /// Baixa a foto do produto (autenticada). Retorna null se o produto não tiver foto.
+  Future<List<int>?> getBytes(String path) async {
+    final res = await _http.get(Uri.parse(baseUrl + path), headers: {if (_access != null) 'Authorization': 'Bearer $_access'});
+    return res.statusCode == 200 ? res.bodyBytes : null;
+  }
 
   Future<void> _refresh(String refresh) async {
     final r = await _send('POST', '/api/v1/auth/refresh', body: {'refreshToken': refresh}, auth: false);

@@ -25,6 +25,10 @@ public class Product : TenantEntity
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     /// <summary>Controle de concorrência otimista (incrementado a cada alteração).</summary>
     public int Version { get; set; } = 1;
+    /// <summary>Chave da foto no armazenamento configurado (local ou Google Drive). Nunca é uma URL pública.</summary>
+    public string? ImageKey { get; set; }
+    public string? ImageContentType { get; set; }
+    public DateTimeOffset? ImageUpdatedAt { get; set; }
 }
 
 public enum StockMovementType { Entry = 1, Sale = 2, Adjustment = 3, SaleCancellation = 4, TransferIn = 5, TransferOut = 6 }

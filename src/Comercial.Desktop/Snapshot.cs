@@ -30,12 +30,12 @@ public static class Snapshot
             Session = new SessionInfo
             {
                 TenantName = "Loja Demo", License = "active",
-                Permissions = ["sales.read", "sales.cancel", "reports.read", "reports.financial", "stock.read", "cash.review", "cash.operate", "sales.create"],
+                Permissions = ["sales.read", "sales.cancel", "reports.read", "reports.financial", "stock.read", "cash.review", "cash.operate", "sales.create", "products.write", "stock.entry", "stock.adjust"],
                 Modules = ["pdv", "estoque", "caixa", "app_proprietario", "lucratividade", "white_label"],
             },
         };
         var main = new MainViewModel(services);
-        var window = new MainWindow(main) { WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = 0, Width = 1600, Height = 980, ShowActivated = false, ShowInTaskbar = false };
+        var window = new MainWindow(main) { WindowState = WindowState.Normal, WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = 0, Width = 1600, Height = 980, ShowActivated = false, ShowInTaskbar = false };
         window.Show();
 
         var login = (LoginViewModel)main.Current;
@@ -58,12 +58,12 @@ public static class Snapshot
         Save(window, Path.Combine(dir, "04-pdv-venda.png"));
 
         var dash = new DashboardViewModel(shell);
-        dash.Kpis.Add(new Kpi("Vendas hoje", "R$ 1.284,90", "37 venda(s)", "", "accent"));
-        dash.Kpis.Add(new Kpi("Lucro bruto hoje", "R$ 602,15", "estimado (sem despesas)", "", "primary"));
-        dash.Kpis.Add(new Kpi("Vendas no mês", "R$ 21.940,30", "612 venda(s)", "", "accent"));
-        dash.Kpis.Add(new Kpi("Lucro bruto no mês", "R$ 10.112,80", "estimado (sem despesas)", "", "primary"));
-        dash.Kpis.Add(new Kpi("Caixas abertos", "1", "agora", "", "neutral"));
-        dash.Kpis.Add(new Kpi("Estoque baixo", "2", "produto(s) para repor", "", "warn"));
+        dash.Kpis.Add(new Kpi("Vendas hoje", "R$ 1.284,90", "37 venda(s)", "\uE7BF", "accent"));
+        dash.Kpis.Add(new Kpi("Lucro bruto hoje", "R$ 602,15", "estimado (sem despesas)", "\uE8C7", "primary"));
+        dash.Kpis.Add(new Kpi("Vendas no mês", "R$ 21.940,30", "612 venda(s)", "\uE787", "accent"));
+        dash.Kpis.Add(new Kpi("Lucro bruto no mês", "R$ 10.112,80", "estimado (sem despesas)", "\uE8C7", "primary"));
+        dash.Kpis.Add(new Kpi("Caixas abertos", "1", "agora", Icons.Bank, "neutral"));
+        dash.Kpis.Add(new Kpi("Estoque baixo", "2", "produto(s) para repor", "\uE7B8", "warn"));
         var rnd = new Random(7);
         foreach (var b in OwnerPage.BuildBars(Enumerable.Range(0, 14).Select(i =>
                  { var rev = rnd.Next(60000, 160000); return (DateTime.Today.AddDays(i - 13).ToString("dd/MM"), (long)rev, (long)(rev * (0.38 + rnd.NextDouble() * 0.12))); })))
@@ -120,15 +120,36 @@ public static class Snapshot
         Save(window, Path.Combine(dir, "07-lucro.png"));
 
         var stock = new StockViewModel(shell);
-        stock.SetRows([
-            new StockRow("Toalha de rosto algodão", "TOA004", "3", "5", true),
-            new StockRow("Caixa organizadora 20 L", "ORG006", "4", "5", true),
-            new StockRow("Caneca de cerâmica 300 ml", "CAN001", "38", "5", false),
-            new StockRow("Caderno universitário 10 matérias", "CAD002", "25", "5", false),
-            new StockRow("Copo de vidro 350 ml", "COP005", "118", "5", false),
-            new StockRow("Pilha alcalina AA (par)", "PIL003", "57", "5", false)]);
+        var thumb = FormViewModel.Load(SamplePng(0x12, 0xA8, 0x6B));
+        StockRow R(string n, string sku, decimal q, long price, bool img = false) =>
+            new(Guid.NewGuid(), n, sku, null, q, 5, price, price / 2, img) { Thumb = img ? thumb : null };
+        var rowsStock = new[]
+        {
+            R("Toalha de rosto algodão", "TOA004", 3, 1990), R("Caixa organizadora 20 L", "ORG006", 4, 4590, true),
+            R("Caneca de cerâmica 300 ml", "CAN001", 38, 2490, true), R("Caderno universitário 10 matérias", "CAD002", 25, 2990),
+            R("Copo de vidro 350 ml", "COP005", 118, 690), R("Pilha alcalina AA (par)", "PIL003", 57, 1190),
+        };
+        stock.SetRows(rowsStock);
         shell.ShowForPreview("stock", stock);
         Save(window, Path.Combine(dir, "08-estoque.png"));
+
+        stock.InventoryMode = true;
+        rowsStock[0].Counted = "2"; rowsStock[2].Counted = "38"; rowsStock[4].Counted = "120";
+        Save(window, Path.Combine(dir, "08b-inventario.png"));
+        stock.InventoryMode = false;
+
+        var form = new FormViewModel { Title = "Novo produto", Message = "Cadastre o produto e, se quiser, a quantidade que já está na loja.", ConfirmText = "Cadastrar produto", AllowImage = true };
+        form.Fields.Add(new FormField("name", "Nome do produto", "Garrafa térmica 500 ml", Icons.Box));
+        form.Fields.Add(new FormField("sku", "Código interno (SKU)", "GAR007", Icons.Edit));
+        form.Fields.Add(new FormField("barcode", "Código de barras", "7891000100073", Icons.Chart));
+        form.Fields.Add(new FormField("price", "Preço de venda (R$)", "39,90", Icons.Money));
+        form.Fields.Add(new FormField("cost", "Custo (R$)", "18,50", Icons.Money));
+        form.Fields.Add(new FormField("min", "Estoque mínimo", "5", Icons.Box));
+        form.Fields.Add(new FormField("qty", "Quantidade inicial na loja", "24", Icons.Add));
+        form.Preview = thumb;
+        shell.ShowForm(form, _ => Task.FromResult(true));
+        Save(window, Path.Combine(dir, "08c-novo-produto.png"));
+        shell.Form = null;
 
         var cash = new CashHistoryViewModel(shell);
         cash.Sessions.Add(new CashRow("18/10 08:02", "—", "Aberto", "R$ 150,00", "—", "—", "—", false, false, ""));
@@ -144,10 +165,34 @@ public static class Snapshot
             ValueLabel = "Dinheiro contado (R$)", TextLabel = "Justificativa (se houver diferença)", ConfirmText = "Fechar caixa",
         }, _ => Task.FromResult(true));
         Save(window, Path.Combine(dir, "10-fechar-caixa.png"));
+        shell.Prompt = null;
+
+        shell.ShowSaleDone(12740, 15000, "Dinheiro");
+        Save(window, Path.Combine(dir, "11-troco.png"));
 
         window.Close();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { File.Delete(dbPath); } catch { /* temporário */ }
+    }
+
+    /// <summary>Imagem de exemplo (gradiente) para a miniatura do produto nas capturas.</summary>
+    private static byte[] SamplePng(byte r, byte g, byte b)
+    {
+        const int w = 96;
+        var px = new byte[w * w * 4];
+        for (var y = 0; y < w; y++)
+            for (var x = 0; x < w; x++)
+            {
+                var i = (y * w + x) * 4;
+                var t = (x + y) / (2.0 * w);
+                px[i] = (byte)(b * (1 - t) + 255 * t * 0.3); px[i + 1] = (byte)(g * (1 - t * 0.5)); px[i + 2] = (byte)(r + (255 - r) * t * 0.4); px[i + 3] = 255;
+            }
+        var src = BitmapSource.Create(w, w, 96, 96, PixelFormats.Bgra32, null, px, w * 4);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(src));
+        using var ms = new MemoryStream();
+        enc.Save(ms);
+        return ms.ToArray();
     }
 
     private static void Save(Window window, string path)

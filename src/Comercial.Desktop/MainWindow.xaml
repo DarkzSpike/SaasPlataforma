@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="{DynamicResource SystemName}" Width="1480" Height="920" MinWidth="1200" MinHeight="760"
-        WindowStartupLocation="CenterScreen" FontFamily="{DynamicResource AppFont}" Background="{DynamicResource BgBrush}">
+        WindowStartupLocation="CenterScreen" WindowState="Maximized" FontFamily="{DynamicResource AppFont}" Background="{DynamicResource BgBrush}">
     <Window.Icon>
         <DrawingImage>
             <DrawingImage.Drawing>

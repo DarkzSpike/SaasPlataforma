@@ -13,6 +13,10 @@ namespace Comercial.Api.Endpoints;
 public sealed record ProductInput(string Sku, string? Barcode, string Name, string? Description, string Unit, long PriceCents, long CostCents, decimal MinStock, Guid? CategoryId, int? ExpectedVersion);
 public sealed record StockEntryRequest(Guid StoreId, Guid ProductId, decimal Quantity, long UnitCostCents, string? Reason);
 public sealed record StockAdjustRequest(Guid StoreId, Guid ProductId, decimal Quantity, string Reason);
+public sealed record InventoryCount(Guid ProductId, decimal CountedQuantity);
+public sealed record InventoryRequest(Guid StoreId, string Reason, List<InventoryCount> Counts);
+public sealed record InventoryResultLine(Guid ProductId, string Name, decimal Previous, decimal Counted, decimal Difference);
+public sealed record PushTokenRequest(string Token, string Platform);
 
 public static class TenantEndpoints
 {
@@ -109,17 +113,68 @@ public static class TenantEndpoints
             return Results.NoContent();
         }).RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true);
 
+        // Foto do produto: conteúdo validado (PNG/JPEG reais), guardada no armazenamento da empresa; leitura só pela API.
+        products.MapPost("/{id:guid}/image", async (Guid id, IFormFile file, ProductImageService s, CancellationToken ct) =>
+        {
+            var p = await s.UploadAsync(id, file, ct);
+            return Results.Ok(new { p.Id, p.ImageContentType, p.ImageUpdatedAt, p.Version });
+        }).RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true)
+          .DisableAntiforgery().WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(6 * 1024 * 1024));
+        products.MapGet("/{id:guid}/image", async (Guid id, ProductImageService s, HttpContext http, CancellationToken ct) =>
+        {
+            var img = await s.ReadAsync(id, ct);
+            if (img is null) return Results.NotFound();
+            http.Response.Headers.CacheControl = "private, max-age=300";
+            return Results.File(img.Value.Bytes, img.Value.ContentType);
+        }).RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
+
         // ---------- Estoque ----------
         var stock = api.MapGroup("/stock");
         stock.MapGet("/balances", async (AppDbContext db, Guid storeId, StockService s) =>
         {
             await s.EnsureStoreAccessAsync(storeId);
-            var rows = await (from b in db.StockBalances.AsNoTracking()
-                              join p in db.Products.AsNoTracking() on b.ProductId equals p.Id
-                              where b.StoreId == storeId
-                              select new { b.ProductId, p.Name, p.Sku, b.Quantity, p.MinStock }).ToListAsync();
-            return Results.Ok(rows.Select(r => new { r.ProductId, r.Name, r.Sku, r.Quantity, r.MinStock, low = r.Quantity <= r.MinStock }));
+            // Todos os produtos ativos, inclusive os ainda sem movimentação (saldo zero).
+            var rows = await (from p in db.Products.AsNoTracking()
+                              where p.IsActive
+                              join b in db.StockBalances.AsNoTracking().Where(b => b.StoreId == storeId) on p.Id equals b.ProductId into bs
+                              from b in bs.DefaultIfEmpty()
+                              select new { ProductId = p.Id, p.Name, p.Sku, p.Barcode, p.PriceCents, p.CostCents, Quantity = b == null ? 0m : b.Quantity, p.MinStock, HasImage = p.ImageKey != null })
+                             .ToListAsync();
+            return Results.Ok(rows.OrderBy(r => r.Name).Select(r => new
+            {
+                r.ProductId, r.Name, r.Sku, r.Barcode, r.PriceCents, r.CostCents, r.Quantity, r.MinStock, r.HasImage, low = r.Quantity <= r.MinStock,
+            }));
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
+
+        // Inventário (auditoria por contagem): ajusta o saldo para o valor contado, preservando o histórico.
+        stock.MapPost("/inventory", async (InventoryRequest r, AppDbContext db, StockService s, AuditService audit, RequestActor a) =>
+        {
+            if (string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Trim().Length < 5) throw new DomainException("reason_required", "Informe o motivo do inventário (mínimo 5 caracteres).");
+            if (r.Counts is null || r.Counts.Count == 0 || r.Counts.Count > 5000) throw new DomainException("invalid_counts", "Informe as contagens.");
+            if (r.Counts.Any(c => c.CountedQuantity < 0 || c.CountedQuantity > 1_000_000)) throw new DomainException("invalid_quantity", "Quantidade contada inválida.");
+            if (r.Counts.Select(c => c.ProductId).Distinct().Count() != r.Counts.Count) throw new DomainException("duplicate_product", "Produto repetido na contagem.");
+            await s.EnsureStoreAccessAsync(r.StoreId);
+            var ids = r.Counts.Select(c => c.ProductId).ToList();
+            var products = await db.Products.AsNoTracking().Where(p => ids.Contains(p.Id)).ToDictionaryAsync(p => p.Id);
+            if (products.Count != ids.Count) throw new DomainException("product_not_found", "Produto inexistente na contagem.", 404);
+            var balances = await db.StockBalances.AsNoTracking().Where(b => b.StoreId == r.StoreId && ids.Contains(b.ProductId)).ToDictionaryAsync(b => b.ProductId, b => b.Quantity);
+
+            var result = new List<InventoryResultLine>();
+            await using var tx = await db.Database.BeginTransactionAsync();
+            var reason = "Inventário: " + r.Reason.Trim();
+            foreach (var c in r.Counts)
+            {
+                var before = balances.GetValueOrDefault(c.ProductId);
+                var diff = c.CountedQuantity - before;
+                if (diff != 0)
+                    await s.MoveAsync(r.StoreId, c.ProductId, diff, StockMovementType.Adjustment, reason, null, products[c.ProductId].CostCents);
+                result.Add(new InventoryResultLine(c.ProductId, products[c.ProductId].Name, before, c.CountedQuantity, diff));
+            }
+            audit.Add("stock.inventory", a.TenantId, "Store", r.StoreId, new { r.Reason, items = r.Counts.Count, adjusted = result.Count(x => x.Difference != 0) });
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Results.Ok(result);
+        }).RequireFeature(ModuleKeys.Stock, Permissions.StockAdjust, write: true);
         stock.MapGet("/movements", async (AppDbContext db, Guid productId) =>
             Results.Ok(await db.StockMovements.AsNoTracking().Where(m => m.ProductId == productId).OrderByDescending(m => m.CreatedAt).Take(500).ToListAsync()))
             .RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
@@ -378,6 +433,42 @@ public static class TenantEndpoints
             .RequireFeature(ModuleKeys.Core, Permissions.DevicesManage);
         api.MapGet("/stores", async (AppDbContext db) => Results.Ok(await db.Stores.AsNoTracking().ToListAsync()))
             .RequireFeature(ModuleKeys.Core, null);
+
+        // ---------- Avisos e push (app do dono) ----------
+        api.MapPost("/push/tokens", async (PushTokenRequest r, AppDbContext db, RequestActor a) =>
+        {
+            if (!a.IsTenantUser) return Results.Json(new { status = 403, code = "user_required" }, statusCode: 403);
+            if (string.IsNullOrWhiteSpace(r.Token) || r.Token.Length > 512) throw new DomainException("invalid_token", "Token de push inválido.");
+            if (r.Platform is not ("android" or "ios")) throw new DomainException("invalid_platform", "Plataforma inválida.");
+            var t = await db.PushTokens.FirstOrDefaultAsync(x => x.Token == r.Token);
+            if (t is null) db.PushTokens.Add(new PushToken { UserId = a.UserId!.Value, Token = r.Token, Platform = r.Platform });
+            else { t.UserId = a.UserId!.Value; t.Platform = r.Platform; t.LastSeenAt = DateTimeOffset.UtcNow; }
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        }).RequireFeature(ModuleKeys.Core, null);
+        api.MapPost("/push/tokens/remove", async (PushTokenRequest r, AppDbContext db, RequestActor a) =>
+        {
+            var t = await db.PushTokens.FirstOrDefaultAsync(x => x.Token == r.Token && x.UserId == a.UserId);
+            if (t is not null) { db.PushTokens.Remove(t); await db.SaveChangesAsync(); }
+            return Results.NoContent();
+        }).RequireFeature(ModuleKeys.Core, null);
+        api.MapGet("/notifications", async (AppDbContext db, RequestActor a, bool? unread) =>
+        {
+            var roles = a.Roles.ToList();
+            var q = db.Notifications.AsNoTracking().Where(n => roles.Contains(n.TargetRole));
+            if (unread == true) q = q.Where(n => n.ReadAt == null);
+            return Results.Ok(await q.OrderByDescending(n => n.CreatedAt).Take(100)
+                .Select(n => new { n.Id, n.Type, n.Title, n.Body, n.CreatedAt, n.ReadAt, n.PushStatus }).ToListAsync());
+        }).RequireFeature(ModuleKeys.Core, null);
+        api.MapPost("/notifications/{id:guid}/read", async (Guid id, AppDbContext db, RequestActor a) =>
+        {
+            var roles = a.Roles.ToList();
+            var n = await db.Notifications.FirstOrDefaultAsync(x => x.Id == id && roles.Contains(x.TargetRole));
+            if (n is null) return Results.NotFound();
+            n.ReadAt ??= DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        }).RequireFeature(ModuleKeys.Core, null);
 
         // ---------- Sincronização offline ----------
         api.MapPost("/sync/batch", async (SyncBatchRequest r, SyncService s) => Results.Ok(await s.ProcessAsync(r)))

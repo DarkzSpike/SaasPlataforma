@@ -19,6 +19,11 @@ No emulador Android, a API local de desenvolvimento fica em `http://10.0.2.2:508
   limpa no logout/troca de conta para não vazar entre empresas.
 - Todas as regras (módulo `app_proprietario`, permissão `reports.read`, licença) são validadas no servidor.
 
+- Aba **Estoque**: lista com fotos, entrada de mercadoria e **cadastro de produto pela câmera** (foto reduzida no aparelho).
+- Aba **Avisos**: quebra de caixa e outros avisos; push via Firebase (ver `docs/OPERACAO.md`).
+  Para o push funcionar: `google-services.json` (Android) e `GoogleService-Info.plist` + chave APNs (iOS).
+  Permissões: câmera e galeria (`NSCameraUsageDescription`/`NSPhotoLibraryUsageDescription` no iOS).
+
 ## Pendências
 - Nome e ícone nativos do app são do produto; ícone/nome por cliente exigem builds separados (flavors).
 - Telas de estoque, caixa, horários e relatórios detalhados.

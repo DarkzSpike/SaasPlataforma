@@ -90,13 +90,13 @@ public sealed class DashboardViewModel(ShellViewModel shell) : OwnerPage(shell, 
         var d = await S.Api.GetAsync("/api/v1/mobile/dashboard");
         long? Opt(string n) => d.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : null;
         Kpis.Clear();
-        Kpis.Add(new Kpi("Vendas hoje", AppServices.Money(d.GetProperty("todayRevenueCents").GetInt64()), $"{d.GetProperty("todaySalesCount").GetInt32()} venda(s)", "", "accent"));
-        if (Opt("todayGrossProfitCents") is { } tp) Kpis.Add(new Kpi("Lucro bruto hoje", AppServices.Money(tp), "estimado (sem despesas)", "", "primary"));
-        Kpis.Add(new Kpi("Vendas no mês", AppServices.Money(d.GetProperty("monthRevenueCents").GetInt64()), $"{d.GetProperty("monthSalesCount").GetInt32()} venda(s)", "", "accent"));
-        if (Opt("monthGrossProfitCents") is { } mp) Kpis.Add(new Kpi("Lucro bruto no mês", AppServices.Money(mp), "estimado (sem despesas)", "", "primary"));
-        Kpis.Add(new Kpi("Caixas abertos", d.GetProperty("openCashSessions").GetInt32().ToString(), "agora", "", "neutral"));
+        Kpis.Add(new Kpi("Vendas hoje", AppServices.Money(d.GetProperty("todayRevenueCents").GetInt64()), $"{d.GetProperty("todaySalesCount").GetInt32()} venda(s)", "\uE7BF", "accent"));
+        if (Opt("todayGrossProfitCents") is { } tp) Kpis.Add(new Kpi("Lucro bruto hoje", AppServices.Money(tp), "estimado (sem despesas)", "\uE8C7", "primary"));
+        Kpis.Add(new Kpi("Vendas no mês", AppServices.Money(d.GetProperty("monthRevenueCents").GetInt64()), $"{d.GetProperty("monthSalesCount").GetInt32()} venda(s)", "\uE787", "accent"));
+        if (Opt("monthGrossProfitCents") is { } mp) Kpis.Add(new Kpi("Lucro bruto no mês", AppServices.Money(mp), "estimado (sem despesas)", "\uE8C7", "primary"));
+        Kpis.Add(new Kpi("Caixas abertos", d.GetProperty("openCashSessions").GetInt32().ToString(), "agora", Icons.Bank, "neutral"));
         var low = d.GetProperty("lowStockProducts").GetInt32();
-        Kpis.Add(new Kpi("Estoque baixo", low.ToString(), low == 0 ? "tudo certo" : "produto(s) para repor", "", low == 0 ? "neutral" : "warn"));
+        Kpis.Add(new Kpi("Estoque baixo", low.ToString(), low == 0 ? "tudo certo" : "produto(s) para repor", "\uE7B8", low == 0 ? "neutral" : "warn"));
         Note = d.GetProperty("note").GetString() ?? "";
 
         Bars.Clear();
@@ -256,10 +256,10 @@ public sealed class ProfitViewModel(ShellViewModel shell) : OwnerPage(shell, "Lu
     {
         var t = r.GetProperty("totals");
         Kpis.Clear();
-        Kpis.Add(new Kpi("Faturamento", AppServices.Money(t.GetProperty("revenueCents").GetInt64()), $"{t.GetProperty("salesCount").GetInt32()} venda(s)", "", "accent"));
-        Kpis.Add(new Kpi("Custo dos produtos", AppServices.Money(t.GetProperty("costCents").GetInt64()), "custo histórico", "", "neutral"));
-        Kpis.Add(new Kpi("Lucro bruto", AppServices.Money(t.GetProperty("grossProfitCents").GetInt64()), "estimado (sem despesas)", "", "primary"));
-        Kpis.Add(new Kpi("Margem bruta", t.GetProperty("marginPercent").GetDecimal().ToString("0.0", AppServices.PtBr) + "%", "sobre o faturamento", "", "primary"));
+        Kpis.Add(new Kpi("Faturamento", AppServices.Money(t.GetProperty("revenueCents").GetInt64()), $"{t.GetProperty("salesCount").GetInt32()} venda(s)", "\uE7BF", "accent"));
+        Kpis.Add(new Kpi("Custo dos produtos", AppServices.Money(t.GetProperty("costCents").GetInt64()), "custo histórico", "\uE7B8", "neutral"));
+        Kpis.Add(new Kpi("Lucro bruto", AppServices.Money(t.GetProperty("grossProfitCents").GetInt64()), "estimado (sem despesas)", "\uE8C7", "primary"));
+        Kpis.Add(new Kpi("Margem bruta", t.GetProperty("marginPercent").GetDecimal().ToString("0.0", AppServices.PtBr) + "%", "sobre o faturamento", "\uE9D2", "primary"));
         var disc = t.GetProperty("saleLevelDiscountCents").GetInt64();
         DiscountNote = disc > 0 ? $"Descontos no total das vendas (não atribuídos a produtos): {AppServices.Money(disc)}" : "";
         Products.Clear();
@@ -280,25 +280,75 @@ public sealed class ProfitViewModel(ShellViewModel shell) : OwnerPage(shell, "Lu
     }
 }
 
-public sealed record StockRow(string Name, string Sku, string Quantity, string Min, bool Low);
+/// <summary>Linha do estoque. No modo inventário, o operador digita a quantidade contada.</summary>
+public sealed class StockRow(Guid productId, string name, string sku, string? barcode, decimal quantity, decimal min, long priceCents, long costCents, bool hasImage) : ObservableObject
+{
+    private string _counted = "";
+    private System.Windows.Media.ImageSource? _thumb;
+    public Guid ProductId { get; } = productId;
+    public string Name { get; } = name;
+    public string Sku { get; } = sku;
+    public string? Barcode { get; } = barcode;
+    public decimal QuantityValue { get; } = quantity;
+    public decimal MinValue { get; } = min;
+    public long PriceCents { get; } = priceCents;
+    public long CostCents { get; } = costCents;
+    public bool HasImage { get; } = hasImage;
+    public string Quantity => QuantityValue.ToString("0.###", AppServices.PtBr);
+    public string Min => MinValue.ToString("0.###", AppServices.PtBr);
+    public string Price => AppServices.Money(PriceCents);
+    public bool Low => QuantityValue <= MinValue;
+    public System.Windows.Media.ImageSource? Thumb { get => _thumb; set { Set(ref _thumb, value); Raise(nameof(HasThumb)); } }
+    public bool HasThumb => Thumb is not null;
+    public string Counted { get => _counted; set { if (Set(ref _counted, value)) { Raise(nameof(Difference)); Raise(nameof(DiffNegative)); Raise(nameof(DiffPositive)); } } }
+    public decimal? CountedValue => decimal.TryParse(Counted, System.Globalization.NumberStyles.Number, AppServices.PtBr, out var v) && v >= 0 ? v : null;
+    public string Difference => CountedValue is { } c ? (c - QuantityValue).ToString("+0.###;-0.###;0", AppServices.PtBr) : "";
+    public bool DiffNegative => CountedValue is { } c && c < QuantityValue;
+    public bool DiffPositive => CountedValue is { } c && c > QuantityValue;
+}
 
 public sealed class StockViewModel : OwnerPage
 {
     private readonly List<StockRow> _all = [];
     private string _filter = "", _summary = "";
-    private bool _onlyLow;
-    public StockViewModel(ShellViewModel shell) : base(shell, "Estoque", "Saldo atual por produto na loja") { }
+    private bool _onlyLow, _inventoryMode;
+    public StockViewModel(ShellViewModel shell) : base(shell, "Estoque", "Saldo por produto, entradas, cadastro com foto e inventário")
+    {
+        NewProductCommand = RelayCommand.Sync(_ => ProductForm(null), _ => CanWrite);
+        EditProductCommand = RelayCommand.Sync(p => ProductForm(p as StockRow), _ => CanWrite);
+        EntryCommand = RelayCommand.Sync(p => { if (p is StockRow r) EntryForm(r); }, _ => S.Session.Can("stock.entry"));
+        StartInventoryCommand = RelayCommand.Sync(_ => { foreach (var r in _all) r.Counted = ""; InventoryMode = true; }, _ => S.Session.Can("stock.adjust"));
+        CancelInventoryCommand = RelayCommand.Sync(_ => InventoryMode = false);
+        SaveInventoryCommand = RelayCommand.Sync(_ => SaveInventory());
+    }
     public ObservableCollection<StockRow> Items { get; } = [];
     public string Filter { get => _filter; set { if (Set(ref _filter, value)) Apply(); } }
     public bool OnlyLow { get => _onlyLow; set { if (Set(ref _onlyLow, value)) Apply(); } }
     public string Summary { get => _summary; set => Set(ref _summary, value); }
+    public bool InventoryMode { get => _inventoryMode; set { if (Set(ref _inventoryMode, value)) Raise(nameof(NormalMode)); } }
+    public bool NormalMode => !InventoryMode;
+    private bool CanWrite => S.Session.Can("products.write");
+    public RelayCommand NewProductCommand { get; }
+    public RelayCommand EditProductCommand { get; }
+    public RelayCommand EntryCommand { get; }
+    public RelayCommand StartInventoryCommand { get; }
+    public RelayCommand CancelInventoryCommand { get; }
+    public RelayCommand SaveInventoryCommand { get; }
 
     protected override async Task LoadCoreAsync()
     {
         var rows = await S.Api.GetAsync($"/api/v1/stock/balances?storeId={S.Settings.StoreId}");
-        SetRows(rows.EnumerateArray().Select(r => new StockRow(r.GetProperty("name").GetString()!, r.GetProperty("sku").GetString()!,
-            r.GetProperty("quantity").GetDecimal().ToString("0.###", AppServices.PtBr), r.GetProperty("minStock").GetDecimal().ToString("0.###", AppServices.PtBr),
-            r.GetProperty("low").GetBoolean())));
+        SetRows(rows.EnumerateArray().Select(r => new StockRow(r.GetProperty("productId").GetGuid(), r.GetProperty("name").GetString()!, r.GetProperty("sku").GetString()!,
+            r.TryGetProperty("barcode", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null,
+            r.GetProperty("quantity").GetDecimal(), r.GetProperty("minStock").GetDecimal(), r.GetProperty("priceCents").GetInt64(),
+            r.GetProperty("costCents").GetInt64(), r.GetProperty("hasImage").GetBoolean())));
+        foreach (var r in _all.Where(r => r.HasImage)) _ = LoadThumbAsync(r);
+    }
+
+    private async Task LoadThumbAsync(StockRow r)
+    {
+        try { if (await S.Api.GetBytesAsync($"/api/v1/products/{r.ProductId}/image") is { } bytes) r.Thumb = FormViewModel.Load(bytes); }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException) { /* miniatura é opcional */ }
     }
 
     public void SetRows(IEnumerable<StockRow> rows)
@@ -312,8 +362,96 @@ public sealed class StockViewModel : OwnerPage
     private void Apply()
     {
         Items.Clear();
-        foreach (var r in _all.Where(r => (!OnlyLow || r.Low) && (Filter.Length == 0 || r.Name.Contains(Filter, StringComparison.OrdinalIgnoreCase) || r.Sku.Contains(Filter, StringComparison.OrdinalIgnoreCase))))
+        foreach (var r in _all.Where(r => (!OnlyLow || r.Low) && (Filter.Length == 0 || r.Name.Contains(Filter, StringComparison.OrdinalIgnoreCase)
+                     || r.Sku.Contains(Filter, StringComparison.OrdinalIgnoreCase) || (r.Barcode?.Contains(Filter) ?? false))))
             Items.Add(r);
+    }
+
+    private static bool TryQty(string s, out decimal v) => decimal.TryParse(s, System.Globalization.NumberStyles.Number, AppServices.PtBr, out v) && v >= 0;
+
+    /// <summary>Cadastro (row = null) ou edição de produto, com foto opcional.</summary>
+    private void ProductForm(StockRow? row)
+    {
+        var f = new FormViewModel
+        {
+            Title = row is null ? "Novo produto" : "Editar produto",
+            Message = row is null ? "Cadastre o produto e, se quiser, a quantidade que já está na loja." : "Alterações de preço ficam registradas na auditoria.",
+            ConfirmText = row is null ? "Cadastrar produto" : "Salvar alterações", AllowImage = true,
+        };
+        f.Fields.Add(new FormField("name", "Nome do produto", row?.Name ?? "", Icons.Box));
+        f.Fields.Add(new FormField("sku", "Código interno (SKU)", row?.Sku ?? "", Icons.Edit));
+        f.Fields.Add(new FormField("barcode", "Código de barras", row?.Barcode ?? "", Icons.Chart, "opcional"));
+        f.Fields.Add(new FormField("price", "Preço de venda (R$)", row is null ? "" : (row.PriceCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
+        f.Fields.Add(new FormField("cost", "Custo (R$)", row is null ? "" : (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
+        f.Fields.Add(new FormField("min", "Estoque mínimo", row?.Min ?? "5", Icons.Box));
+        if (row is null) f.Fields.Add(new FormField("qty", "Quantidade inicial na loja", "", Icons.Add, "0"));
+        if (row?.Thumb is System.Windows.Media.Imaging.BitmapImage thumb) f.Preview = thumb;
+
+        Shell.ShowForm(f, async form =>
+        {
+            if (form["name"].Length == 0 || form["sku"].Length == 0) { form.Error = "Informe o nome e o código interno."; return false; }
+            if (!PromptViewModel.TryMoney(form["price"], out var price) || !PromptViewModel.TryMoney(form["cost"], out var cost)) { form.Error = "Preço ou custo inválido."; return false; }
+            if (!TryQty(form["min"].Length == 0 ? "0" : form["min"], out var min)) { form.Error = "Estoque mínimo inválido."; return false; }
+            decimal qty = 0;
+            if (row is null && form["qty"].Length > 0 && !TryQty(form["qty"], out qty)) { form.Error = "Quantidade inicial inválida."; return false; }
+            var body = new { sku = form["sku"], barcode = form["barcode"].Length == 0 ? null : form["barcode"], name = form["name"], unit = "UN", priceCents = price, costCents = cost, minStock = min };
+            Guid id;
+            if (row is null) id = (await S.Api.PostAsync("/api/v1/products", body)).GetProperty("id").GetGuid();
+            else { await S.Api.PutAsync($"/api/v1/products/{row.ProductId}", body); id = row.ProductId; }
+            if (qty > 0)
+                await S.Api.PostAsync("/api/v1/stock/entries", new { storeId = S.Settings.StoreId, productId = id, quantity = qty, unitCostCents = cost, reason = "estoque inicial" });
+            if (form.ImagePath is { } path)
+                await S.Api.UploadAsync($"/api/v1/products/{id}/image", await System.IO.File.ReadAllBytesAsync(path), System.IO.Path.GetFileName(path), FormViewModel.ContentTypeOf(path));
+            await LoadAsync();
+            return true;
+        });
+    }
+
+    private void EntryForm(StockRow row)
+    {
+        var f = new FormViewModel { Title = "Entrada de mercadoria", Message = $"{row.Name} — em estoque: {row.Quantity}", ConfirmText = "Registrar entrada" };
+        f.Fields.Add(new FormField("qty", "Quantidade recebida", "", Icons.Add));
+        f.Fields.Add(new FormField("cost", "Custo unitário (R$)", (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
+        f.Fields.Add(new FormField("reason", "Nota fiscal / fornecedor", "", Icons.Edit, "opcional"));
+        Shell.ShowForm(f, async form =>
+        {
+            if (!TryQty(form["qty"], out var qty) || qty <= 0) { form.Error = "Informe a quantidade recebida."; return false; }
+            if (!PromptViewModel.TryMoney(form["cost"], out var cost)) { form.Error = "Custo inválido."; return false; }
+            await S.Api.PostAsync("/api/v1/stock/entries", new { storeId = S.Settings.StoreId, productId = row.ProductId, quantity = qty, unitCostCents = cost, reason = form["reason"].Length == 0 ? "entrada de mercadoria" : form["reason"] });
+            await LoadAsync();
+            return true;
+        });
+    }
+
+    private void SaveInventory()
+    {
+        var counted = _all.Where(r => r.Counted.Trim().Length > 0).ToList();
+        if (counted.Count == 0) { Error = "Digite a quantidade contada de pelo menos um produto."; return; }
+        if (counted.Any(r => r.CountedValue is null)) { Error = "Há quantidades contadas inválidas."; return; }
+        var changes = counted.Count(r => r.CountedValue != r.QuantityValue);
+        Shell.ShowPrompt(new PromptViewModel
+        {
+            Title = "Concluir inventário",
+            Message = $"{counted.Count} produto(s) contado(s), {changes} com diferença. O saldo será ajustado para o valor contado e cada ajuste fica registrado no histórico.",
+            TextLabel = "Motivo / responsável pela contagem", ConfirmText = "Ajustar estoque",
+        }, async p =>
+        {
+            if (p.Text.Trim().Length < 5) { p.Error = "Informe o motivo (mínimo 5 caracteres)."; return false; }
+            try
+            {
+                await S.Api.PostAsync("/api/v1/stock/inventory", new
+                {
+                    storeId = S.Settings.StoreId, reason = p.Text.Trim(),
+                    counts = counted.Select(r => new { productId = r.ProductId, countedQuantity = r.CountedValue!.Value }).ToList(),
+                });
+                InventoryMode = false;
+                await LoadAsync();
+                return true;
+            }
+            catch (ApiException ex) { p.Error = ex.Code == "permission_denied" ? "Seu usuário não pode ajustar o estoque." : "Falha: " + ex.Code; }
+            catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
+            return false;
+        });
     }
 }
 

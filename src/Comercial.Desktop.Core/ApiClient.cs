@@ -39,6 +39,38 @@ public sealed class ApiClient(HttpClient http)
     public Task<SyncBatchResponse> SyncAsync(SyncBatchRequest r) => Send<SyncBatchResponse>(HttpMethod.Post, "/api/v1/sync/batch", r);
     public Task<JsonElement> GetAsync(string path) => Send<JsonElement>(HttpMethod.Get, path);
     public Task<JsonElement> PostAsync(string path, object body) => Send<JsonElement>(HttpMethod.Post, path, body);
+    public Task<JsonElement> PutAsync(string path, object body) => Send<JsonElement>(HttpMethod.Put, path, body);
+
+    /// <summary>Envia um arquivo (multipart, campo "file"). O servidor valida o conteúdo real.</summary>
+    public async Task<JsonElement> UploadAsync(string path, byte[] bytes, string fileName, string contentType)
+    {
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        form.Add(file, "file", fileName);
+        using var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = form };
+        if (_access is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _access);
+        using var res = await http.SendAsync(req);
+        if (!res.IsSuccessStatusCode) throw new ApiException((int)res.StatusCode, await CodeOf(res));
+        return await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+    }
+
+    /// <summary>Baixa bytes (ex.: foto do produto). Retorna null se não existir.</summary>
+    public async Task<byte[]?> GetBytesAsync(string path)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, path);
+        if (_access is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _access);
+        using var res = await http.SendAsync(req);
+        if (res.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        if (!res.IsSuccessStatusCode) throw new ApiException((int)res.StatusCode, await CodeOf(res));
+        return await res.Content.ReadAsByteArrayAsync();
+    }
+
+    private static async Task<string> CodeOf(HttpResponseMessage res)
+    {
+        try { return (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString() ?? "http_error"; }
+        catch { return "http_error"; }
+    }
 
     private async Task<T> Send<T>(HttpMethod method, string path, object? body = null, bool auth = true)
     {
@@ -46,12 +78,7 @@ public sealed class ApiClient(HttpClient http)
         if (auth && _access is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _access);
         if (body is not null) req.Content = JsonContent.Create(body, options: Json);
         using var res = await http.SendAsync(req);
-        if (!res.IsSuccessStatusCode)
-        {
-            var code = "http_error";
-            try { code = (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString() ?? code; } catch { /* corpo não JSON */ }
-            throw new ApiException((int)res.StatusCode, code);
-        }
+        if (!res.IsSuccessStatusCode) throw new ApiException((int)res.StatusCode, await CodeOf(res));
         if (res.StatusCode == System.Net.HttpStatusCode.NoContent) return default!;
         return (await res.Content.ReadFromJsonAsync<T>(Json))!;
     }

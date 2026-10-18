@@ -50,6 +50,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     public DbSet<FiscalDocument> FiscalDocuments => Set<FiscalDocument>();
     public DbSet<FiscalEvent> FiscalEvents => Set<FiscalEvent>();
     public DbSet<SyncEvent> SyncEvents => Set<SyncEvent>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<PushToken> PushTokens => Set<PushToken>();
 
     /// <summary>Entidades que nunca podem ser alteradas ou excluídas depois de gravadas.</summary>
     private static readonly HashSet<Type> Immutable =
@@ -69,9 +71,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     {
         if (Database.IsSqlite())
         {
-            // SQLite não ordena/compara DateTimeOffset nem soma decimal nativamente.
-            b.Properties<DateTimeOffset>().HaveConversion<DateTimeOffsetToBinaryConverter>();
-            b.Properties<DateTimeOffset?>().HaveConversion<DateTimeOffsetToBinaryConverter>();
+            // SQLite não ordena/compara DateTimeOffset nativamente. Gravamos SEMPRE em UTC: com fusos misturados
+            // (ex.: filtro "hoje" vindo do PDV em -03:00) a comparação binária ficaria errada.
+            b.Properties<DateTimeOffset>().HaveConversion<UtcBinaryConverter>();
+            b.Properties<DateTimeOffset?>().HaveConversion<UtcBinaryConverter>();
             b.Properties<decimal>().HaveConversion<double>();
         }
         else
@@ -84,6 +87,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     }
 
     private sealed class UtcDateTimeOffsetConverter() : ValueConverter<DateTimeOffset, DateTimeOffset>(v => v.ToUniversalTime(), v => v);
+
+    /// <summary>
+    /// Mesmo formato do DateTimeOffsetToBinaryConverter ((ticks/1000) &lt;&lt; 11 | offset em minutos), mas sempre em UTC,
+    /// o que torna a ordenação/comparação numérica correta. Lê registros antigos gravados com outro offset.
+    /// </summary>
+    public sealed class UtcBinaryConverter() : ValueConverter<DateTimeOffset, long>(v => (v.UtcTicks / 1000) << 11, v => FromBinary(v))
+    {
+        public static DateTimeOffset FromBinary(long v)
+        {
+            var offsetMinutes = (v << 53) >> 53; // 11 bits com sinal
+            return new DateTimeOffset(new DateTime((v >> 11) * 1000), TimeSpan.FromMinutes(offsetMinutes)).ToUniversalTime();
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -237,6 +253,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
         });
         m.Entity<FiscalEvent>(e => e.ToTable("fiscal_events"));
         m.Entity<SyncEvent>(e => { e.ToTable("sync_events"); e.HasIndex(x => new { x.TenantId, x.DeviceId, x.IdempotencyKey }).IsUnique(); });
+        m.Entity<Notification>(e =>
+        {
+            e.ToTable("notifications");
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.PushStatus);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Body).HasMaxLength(1000);
+        });
+        m.Entity<PushToken>(e =>
+        {
+            e.ToTable("push_tokens");
+            e.HasIndex(x => new { x.TenantId, x.Token }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.UserId });
+            e.Property(x => x.Token).HasMaxLength(512);
+        });
+        m.Entity<Product>(e => { e.Property(x => x.ImageKey).HasMaxLength(300); e.Property(x => x.ImageContentType).HasMaxLength(40); });
 
         // FK para tenants em todas as entidades com escopo + filtro global de isolamento.
         foreach (var et in m.Model.GetEntityTypes().Where(t => typeof(ITenantScoped).IsAssignableFrom(t.ClrType)).ToList())

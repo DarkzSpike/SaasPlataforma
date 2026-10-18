@@ -43,6 +43,19 @@ builder.Services.AddScoped<TenantProvisioningService>();
 builder.Services.AddScoped<BrandingService>();
 builder.Services.AddScoped<SupportService>();
 builder.Services.AddScoped<PaymentWebhookService>();
+builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<ProductImageService>();
+builder.Services.AddSingleton<IProductImageStore, LocalProductImageStore>();
+if (config["ProductImages:Provider"] == "GoogleDrive")
+    builder.Services.AddSingleton<IProductImageStore, GoogleDriveProductImageStore>();
+builder.Services.AddHttpClient("fcm", c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<FcmPushSender>();
+builder.Services.AddSingleton<IPushSender>(sp =>
+{
+    var fcm = sp.GetRequiredService<FcmPushSender>();
+    return fcm.Configured ? fcm : new NotConfiguredPushSender();
+});
+builder.Services.AddHostedService<PushRetryService>();
 
 var dp = builder.Services.AddDataProtection().SetApplicationName("comercial-saas");
 if (config["DataProtection:KeysPath"] is { Length: > 0 } keysPath) dp.PersistKeysToFileSystem(new DirectoryInfo(keysPath));

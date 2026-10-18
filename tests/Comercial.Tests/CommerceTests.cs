@@ -229,6 +229,42 @@ public class CommerceTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyncLife
     }
 
     [Fact]
+    public async Task Filtros_de_periodo_com_horario_de_Brasilia_encontram_as_vendas()
+    {
+        // Regressão: o PDV envia "hoje" como 00:00-03:00. Antes, no SQLite, a comparação com datas UTC falhava
+        // e Histórico/Lucro apareciam vazios mesmo com vendas.
+        var t = await api.CreateTenant("fuso-" + Guid.NewGuid().ToString("N")[..6]);
+        var p = await api.CreateProduct(t.OwnerToken, "F1", price: 1000, cost: 400);
+        var c = await api.OpenCash(t.OwnerToken, t.StoreId);
+        await Api.Expect(await api.Post("/api/v1/sales", t.OwnerToken, Api.Sale(t.StoreId, c, p)), HttpStatusCode.Created);
+        var brt = TimeSpan.FromHours(-3);
+        var nowBr = DateTimeOffset.UtcNow.ToOffset(brt);
+        var from = new DateTimeOffset(nowBr.Date, brt).AddDays(-1);
+        var to = nowBr.AddMinutes(5);
+        string Q(DateTimeOffset d) => Uri.EscapeDataString(d.ToString("O"));
+
+        var list = await Api.Expect(await api.Get($"/api/v1/sales?from={Q(from)}&to={Q(to)}", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(1, list.GetArrayLength());
+        var summary = await Api.Expect(await api.Get($"/api/v1/reports/sales-summary?from={Q(from)}&to={Q(to)}", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(1000, summary.GetProperty("revenueCents").GetInt64());
+        // Limite superior em -03:00 antes da venda: não pode incluir.
+        var before = await Api.Expect(await api.Get($"/api/v1/sales?from={Q(from)}&to={Q(nowBr.AddMinutes(-10))}", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(0, before.GetArrayLength());
+    }
+
+    [Fact]
+    public void Conversor_de_data_do_SQLite_le_formato_antigo_e_compara_em_UTC()
+    {
+        var conv = new Comercial.Infrastructure.Data.AppDbContext.UtcBinaryConverter();
+        var utc = new DateTimeOffset(2026, 10, 18, 10, 0, 0, TimeSpan.Zero);
+        var br = utc.ToOffset(TimeSpan.FromHours(-3));
+        Assert.Equal(conv.ConvertToProvider(utc), conv.ConvertToProvider(br));
+        var legacy = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.DateTimeOffsetToBinaryConverter();
+        Assert.Equal(utc, (DateTimeOffset)conv.ConvertFromProvider(legacy.ConvertToProvider(br))!);
+        Assert.True((long)conv.ConvertToProvider(utc)! < (long)conv.ConvertToProvider(utc.AddSeconds(1))!);
+    }
+
+    [Fact]
     public void Dia_e_mes_seguem_o_fuso_da_loja()
     {
         var tz = Comercial.Api.Services.StoreClock.Find("America/Sao_Paulo");

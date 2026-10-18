@@ -25,7 +25,7 @@ GRANT USAGE ON SCHEMA public TO app_comercial;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO app_comercial;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_comercial;
 -- DELETE só onde a aplicação realmente remove linhas (vínculos de papéis/permissões).
-GRANT DELETE ON user_roles, user_permissions TO app_comercial;
+GRANT DELETE ON user_roles, user_permissions, push_tokens TO app_comercial;
 
 CREATE OR REPLACE FUNCTION app_tenant_ok(t uuid) RETURNS boolean
 LANGUAGE sql STABLE AS $$
@@ -42,7 +42,8 @@ BEGIN
     'stores','users','user_roles','user_permissions','user_sessions','devices','subscriptions','tenant_modules',
     'invoices','tenant_branding','branding_versions','branding_assets','categories','products','stock_movements',
     'stock_balances','sales','sale_items','payments','cash_sessions','cash_movements','store_hours',
-    'operating_events','fiscal_documents','fiscal_events','sync_events','support_sessions','support_elevation_requests']
+    'operating_events','fiscal_documents','fiscal_events','sync_events','support_sessions','support_elevation_requests',
+    'notifications','push_tokens']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);

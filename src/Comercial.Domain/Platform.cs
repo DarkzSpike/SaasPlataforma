@@ -79,6 +79,44 @@ public class AuditLog
     public string Hash { get; set; } = "";
 }
 
+public static class PushStatus
+{
+    public const string Pending = "pending";
+    public const string Sent = "sent";
+    /// <summary>Nenhum provedor de push configurado (ex.: Firebase ainda não cadastrado): fica visível só no app.</summary>
+    public const string NoProvider = "no_provider";
+    /// <summary>Nenhum aparelho do destinatário registrado para push.</summary>
+    public const string NoDevice = "no_device";
+    public const string Failed = "failed";
+}
+
+/// <summary>Aviso para o dono da empresa (ex.: quebra de caixa). Exibido no app e enviado por push quando possível.</summary>
+public class Notification : TenantEntity
+{
+    public string Type { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Body { get; set; } = "";
+    public string? DataJson { get; set; }
+    /// <summary>Papel destinatário (por padrão o proprietário).</summary>
+    public string TargetRole { get; set; } = "owner";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ReadAt { get; set; }
+    public string PushStatus { get; set; } = Domain.PushStatus.Pending;
+    public int PushAttempts { get; set; }
+    public DateTimeOffset? PushedAt { get; set; }
+    public string? LastPushError { get; set; }
+}
+
+/// <summary>Token de push de um aparelho (FCM; no iOS o FCM entrega via APNs).</summary>
+public class PushToken : TenantEntity
+{
+    public Guid UserId { get; set; }
+    public string Token { get; set; } = "";
+    public string Platform { get; set; } = "android";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastSeenAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public class TenantBranding : ITenantScoped
 {
     public Guid TenantId { get; set; }

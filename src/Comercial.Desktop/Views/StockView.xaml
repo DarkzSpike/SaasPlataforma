@@ -4,24 +4,59 @@
              xmlns:local="clr-namespace:Comercial.Desktop">
     <DockPanel>
         <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+
+        <!-- Barra de ações -->
         <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="420"/>
+                <ColumnDefinition Width="380"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE721;" local:Ui.Placeholder="Filtrar por nome ou SKU" Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Filtrar estoque"/>
+            <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE721;" local:Ui.Placeholder="Filtrar por nome, SKU ou código de barras" Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Filtrar estoque"/>
             <CheckBox Grid.Column="1" Content="Só estoque baixo" IsChecked="{Binding OnlyLow}" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" Margin="18,0" FontSize="14"/>
-            <TextBlock Grid.Column="2" Text="{Binding Summary}" Style="{StaticResource Muted}" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+            <TextBlock Grid.Column="2" Text="{Binding Summary}" Style="{StaticResource Muted}" FontSize="14" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Visibility="{Binding NormalMode, Converter={StaticResource Vis}}">
+                <Button Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE710;" Content="Novo produto" Margin="0,0,10,0" Command="{Binding NewProductCommand}"/>
+                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE9D5;" Content="Fazer inventário" Command="{Binding StartInventoryCommand}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Visibility="{Binding InventoryMode, Converter={StaticResource Vis}}">
+                <Button Style="{StaticResource DarkButton}" Content="Cancelar" Margin="0,0,10,0" Command="{Binding CancelInventoryCommand}"/>
+                <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE73E;" Content="Concluir inventário" Command="{Binding SaveInventoryCommand}"/>
+            </StackPanel>
         </Grid>
+
+        <Border DockPanel.Dock="Top" Background="#261E8CFF" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,14"
+                Visibility="{Binding InventoryMode, Converter={StaticResource Vis}}">
+            <TextBlock Foreground="White" TextWrapping="Wrap"
+                       Text="Modo inventário: conte cada produto na prateleira e digite a quantidade na coluna &quot;Contado&quot;. Deixe em branco o que não foi contado. Ao concluir, o saldo é ajustado e cada diferença fica registrada no histórico."/>
+        </Border>
+
         <Border Style="{StaticResource Card}" ClipToBounds="True">
-            <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Items}" AutomationProperties.Name="Saldos de estoque">
+            <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Items}" RowHeight="58" AutomationProperties.Name="Saldos de estoque">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*"/>
-                    <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="140"/>
-                    <DataGridTextColumn Header="Em estoque" Binding="{Binding Quantity}" Width="130"/>
-                    <DataGridTextColumn Header="Mínimo" Binding="{Binding Min}" Width="110"/>
-                    <DataGridTemplateColumn Header="Situação" Width="150">
+                    <DataGridTemplateColumn Header="Produto" Width="*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="44" Height="44" CornerRadius="8" Background="{DynamicResource Surface3Brush}" Margin="0,0,12,0" ClipToBounds="True">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE7B8;" HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}"
+                                                       Visibility="{Binding HasThumb, Converter={StaticResource Vis}, ConverterParameter=not}"/>
+                                            <Image Source="{Binding Thumb}" Stretch="UniformToFill"/>
+                                        </Grid>
+                                    </Border>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" Foreground="White" FontSize="15"/>
+                                        <TextBlock Style="{StaticResource Muted}" FontSize="12"><Run Text="{Binding Sku, Mode=OneWay}"/><Run Text="  •  "/><Run Text="{Binding Price, Mode=OneWay}"/></TextBlock>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Em estoque" Binding="{Binding Quantity}" Width="120"/>
+                    <DataGridTextColumn Header="Mínimo" Binding="{Binding Min}" Width="90"/>
+                    <DataGridTemplateColumn Header="Situação" Width="110">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <Border CornerRadius="10" Padding="10,3" HorizontalAlignment="Left">
@@ -44,6 +79,35 @@
                                         </TextBlock.Style>
                                     </TextBlock>
                                 </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <!-- Ações normais / colunas do inventário (a visibilidade segue o modo da página) -->
+                    <DataGridTemplateColumn Header="Ações / Contagem" Width="300">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" Visibility="{Binding DataContext.NormalMode, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource Vis}}">
+                                        <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE710;" Content="Entrada" Height="36" Padding="12,0" Margin="0,0,8,0"
+                                                Command="{Binding DataContext.EntryCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
+                                        <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE722;" Content="Editar / foto" Height="36" Padding="12,0"
+                                                Command="{Binding DataContext.EditProductCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Visibility="{Binding DataContext.InventoryMode, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource Vis}}">
+                                        <TextBox Style="{StaticResource DarkInput}" Width="120" Height="38" local:Ui.Placeholder="Contado" Text="{Binding Counted, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Quantidade contada"/>
+                                        <TextBlock Text="{Binding Difference}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding DiffNegative}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+                                                        <DataTrigger Binding="{Binding DiffPositive}" Value="True"><Setter Property="Foreground" Value="{DynamicResource WarnBrush}"/></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>

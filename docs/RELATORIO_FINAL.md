@@ -66,6 +66,11 @@ Os 42 módulos do pedido estão no catálogo com dependências. O status reflete
 | Beta | Fiscal (sem SEFAZ), Usuários avançados, Caixa por operador, Múltiplas lojas (só limites), App do proprietário (API pronta), Lucratividade (lucro e margem por produto e por dia) |
 | Planejado (não habilitável) | os outros 30 (compras, financeiro, CRM, fidelidade, e-commerce, balanças, BI etc.) |
 
+Etapa 4 (18/10/2026): janela de troco que só fecha com confirmação; Estoque com entrada de mercadoria, cadastro/
+edição de produto com foto (armazenamento local ou Google Drive) e inventário por contagem; aviso de quebra de caixa
+para o dono (app + push via Firebase quando configurado). Corrigido bug real: filtros de período enviados com
+fuso -03:00 não encontravam vendas no SQLite (Histórico/Lucro vazios). Testes: 87 (SQLite) e 90 (PostgreSQL).
+
 O PDV Windows tem área do dono (Painel, Histórico com cancelamento, Lucro, Estoque, Caixas). Cada aba só aparece
 se a empresa contratou o módulo e o usuário tem a permissão — e o servidor revalida tudo. Capturas das telas
 podem ser geradas com `Comercial.Desktop.exe --snapshot <pasta>` (dados de exemplo, sem servidor).

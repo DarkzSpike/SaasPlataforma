@@ -10,7 +10,7 @@ public sealed record OpenCashRequest(Guid StoreId, long OpeningCents, Guid? Devi
 public sealed record CashMovementRequest(long AmountCents, string Reason);
 public sealed record CloseCashRequest(long DeclaredCashCents, string? Justification);
 
-public sealed class CashService(AppDbContext db, RequestActor actor, AuditService audit, StockService stock, ScopedLookup lookup)
+public sealed class CashService(AppDbContext db, RequestActor actor, AuditService audit, StockService stock, ScopedLookup lookup, NotificationService notifications)
 {
     public async Task<CashSession> OpenAsync(OpenCashRequest r)
     {
@@ -66,6 +66,17 @@ public sealed class CashService(AppDbContext db, RequestActor actor, AuditServic
         s.Justification = r.Justification;
         audit.Add("cash.closed", actor.TenantId, nameof(CashSession), s.Id, new { expected, r.DeclaredCashCents, diff });
         await db.SaveChangesAsync();
+
+        // Quebra de caixa (faltou dinheiro): avisa o dono no app (push quando configurado).
+        if (diff < 0)
+        {
+            var pt = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+            var who = await db.Users.AsNoTracking().Where(u => u.Id == s.OperatorUserId).Select(u => u.DisplayName).FirstOrDefaultAsync() ?? "operador";
+            var store = await db.Stores.AsNoTracking().Where(x => x.Id == s.StoreId).Select(x => x.Name).FirstOrDefaultAsync() ?? "";
+            await notifications.CreateAsync(actor.TenantId, "cash.shortage", $"Quebra de caixa: {(-diff / 100m).ToString("C", pt)}",
+                $"Caixa de {who} ({store}) fechado com falta de {(-diff / 100m).ToString("C", pt)}. Esperado {(expected / 100m).ToString("C", pt)}, contado {(r.DeclaredCashCents / 100m).ToString("C", pt)}. Justificativa: {r.Justification}",
+                new { cashSessionId = s.Id, diffCents = diff, expectedCents = expected, declaredCents = r.DeclaredCashCents });
+        }
         return s;
     }
 
