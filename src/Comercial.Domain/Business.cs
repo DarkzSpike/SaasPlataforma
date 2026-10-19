@@ -69,6 +69,8 @@ public class Customer : TenantEntity
     public string? Notes { get; set; }
     /// <summary>Consentimento para comunicações de marketing (LGPD): registrado com data.</summary>
     public bool MarketingConsent { get; set; }
+    /// <summary>Limite para vender no fiado (crediário). 0 = não pode comprar fiado.</summary>
+    public long CreditLimitCents { get; set; }
     public DateTimeOffset? ConsentAt { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -124,6 +126,8 @@ public class FinancialTitle : TenantEntity
     public Guid? SupplierId { get; set; }
     public Guid? CustomerId { get; set; }
     public Guid? PurchaseOrderId { get; set; }
+    /// <summary>Venda que gerou a conta (fiado).</summary>
+    public Guid? SaleId { get; set; }
     public DateOnly DueDate { get; set; }
     public long AmountCents { get; set; }
     public TitleStatus Status { get; set; } = TitleStatus.Open;

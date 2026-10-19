@@ -1,0 +1,10 @@
+# HTTPS automático (Let's Encrypt). Os domínios vêm do arquivo .env.
+{$API_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8080
+}
+
+{$ADMIN_DOMAIN} {
+	encode gzip
+	reverse_proxy admin:8080
+}

@@ -11,3 +11,8 @@ dev-data/
 mobile/.dart_tool/
 mobile/build/
 *.local.txt
+
+artifacts/
+deploy/docker/.env
+deploy/docker/secrets/
+deploy/docker/backups/

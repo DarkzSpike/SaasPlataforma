@@ -16,6 +16,36 @@ public sealed record Receipt(DateTime When, IReadOnlyList<ReceiptLine> Lines, lo
 /// </summary>
 public static class ReceiptPrinter
 {
+    /// <summary>Periféricos do terminal (definidos ao abrir o PDV e ao salvar em Dispositivos).</summary>
+    public static DeviceSettings Devices { get; set; } = new();
+    private static bool UseEscPos => Devices.EscPos && !string.IsNullOrWhiteSpace(Devices.PrinterName);
+
+    /// <summary>Abre a gaveta de dinheiro (pulso pela impressora térmica). Silencioso se não houver impressora configurada.</summary>
+    public static string? OpenDrawer()
+    {
+        if (!UseEscPos) return null;
+        try { RawPrinter.Send(Devices.PrinterName!, new Comercial.Desktop.Core.Hardware.EscPosBuilder(Devices.PaperMm).OpenDrawer().Build(), "Gaveta"); return null; }
+        catch (InvalidOperationException ex) { return ex.Message; }
+    }
+
+    private static byte[] EscPosBytes(Receipt r, bool drawer) => Comercial.Desktop.Core.Hardware.ReceiptEscPos.Build(new(
+        Application.Current?.Resources["SystemName"] as string ?? "Loja", r.When,
+        r.Lines.Select(l => new Comercial.Desktop.Core.Hardware.PrintLine(l.Name, l.Quantity, l.UnitCents, l.TotalCents)).ToList(),
+        r.TotalCents, r.DiscountCents, r.PaidCents, Math.Max(0, r.PaidCents - r.TotalCents), r.Method, r.CustomerName, r.PointsEarned,
+        Footer: Devices.ReceiptFooter ?? "Obrigado pela preferência!"), Devices.PaperMm, drawer);
+
+    /// <summary>Impressão automática ao finalizar a venda (térmica ESC/POS). Devolve mensagem de erro ou null.</summary>
+    public static string? AutoPrint(Receipt r, bool cashSale)
+    {
+        if (!UseEscPos) return null;
+        try
+        {
+            if (Devices.AutoPrint) RawPrinter.Send(Devices.PrinterName!, EscPosBytes(r, cashSale && Devices.OpenDrawerOnCash), "Cupom");
+            else if (cashSale && Devices.OpenDrawerOnCash) return OpenDrawer();
+            return null;
+        }
+        catch (InvalidOperationException ex) { return "Impressora: " + ex.Message; }
+    }
     public static FlowDocument Build(Receipt r)
     {
         var res = Application.Current.Resources;
@@ -46,6 +76,11 @@ public static class ReceiptPrinter
 
     public static void Print(Receipt r)
     {
+        if (UseEscPos)
+        {
+            try { RawPrinter.Send(Devices.PrinterName!, EscPosBytes(r, false), "Cupom"); return; }
+            catch (InvalidOperationException ex) { MessageBox.Show(ex.Message, "Impressora", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+        }
         var dlg = new PrintDialog();
         if (dlg.ShowDialog() != true) return;
         var doc = Build(r);

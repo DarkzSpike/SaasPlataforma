@@ -377,6 +377,15 @@ public sealed class StockRow(Guid productId, string name, string sku, string? ba
     public long PriceCents { get; } = priceCents;
     public long CostCents { get; } = costCents;
     public bool HasImage { get; } = hasImage;
+    // Dados preservados na edição (unidade e fiscais).
+    public string Unit { get; init; } = "UN";
+    public string? Ncm { get; init; }
+    public string? Cest { get; init; }
+    public string? Cfop { get; init; }
+    public int FiscalOrigin { get; init; }
+    public string? IcmsCst { get; init; }
+    public string? IbsCbsCst { get; init; }
+    public string? IbsCbsClass { get; init; }
     public string Quantity => QuantityValue.ToString("0.###", AppServices.PtBr);
     public string Min => MinValue.ToString("0.###", AppServices.PtBr);
     public string Price => AppServices.Money(PriceCents);
@@ -406,6 +415,226 @@ public sealed class StockViewModel : OwnerPage
         ExportCommand = new RelayCommand(_ => ExportCsvAsync($"/api/v1/reports/export/stock.csv?storeId={S.Settings.StoreId}", "estoque"));
     }
     public ObservableCollection<StockRow> Items { get; } = [];
+
+    // ---------------- Importações, validades e transferências ----------------
+    private static readonly string[] ImportOptions = ["NF-e de compra (arquivo XML do fornecedor)", "Planilha de produtos (CSV do Excel)"];
+    public RelayCommand ImportCommand => RelayCommand.Sync(_ =>
+    {
+        var f = new FormViewModel { Title = "Importar", Message = "Escolha o tipo de arquivo.", ConfirmText = "Escolher arquivo" };
+        f.Fields.Add(new FormField("kind", "Tipo", ImportOptions[0], options: ImportOptions));
+        Shell.ShowForm(f, form =>
+        {
+            var xml = form["kind"] == ImportOptions[0];
+            var dlg = new Microsoft.Win32.OpenFileDialog { Filter = xml ? "NF-e (*.xml)|*.xml" : "Planilha CSV (*.csv)|*.csv" };
+            if (dlg.ShowDialog() != true) return Task.FromResult(false);
+            if (new System.IO.FileInfo(dlg.FileName).Length > 3_000_000) { form.Error = "Arquivo grande demais."; return Task.FromResult(false); }
+            var text = System.IO.File.ReadAllText(dlg.FileName);
+            Shell.Form = null;
+            if (xml) _ = PreviewNfeAsync(text); else _ = ImportCsvAsync(text);
+            return Task.FromResult(false);
+        });
+    }, _ => S.Session.Can("stock.entry"));
+
+    private async Task PreviewNfeAsync(string xml)
+    {
+        try
+        {
+            var pv = await S.Api.PostAsync("/api/v1/purchases/nfe/preview", new { xml });
+            var items = pv.GetProperty("items").EnumerateArray().ToList();
+            var matched = items.Count(i => i.GetProperty("matchedProductId").ValueKind != JsonValueKind.Null);
+            if (pv.GetProperty("alreadyImported").GetBoolean()) { Error = "Esta NF-e já foi importada."; return; }
+            Shell.ShowPrompt(new PromptViewModel
+            {
+                Title = $"NF-e {pv.GetProperty("number").GetString()} — {pv.GetProperty("supplierName").GetString()}",
+                Message = $"{items.Count} item(ns), total {AppServices.Money(pv.GetProperty("totalCents").GetInt64())}. {matched} já existem (pelo código de barras) e terão custo e estoque atualizados; "
+                          + $"{items.Count - matched} serão cadastrados com o preço = custo + margem. Lote e validade da nota também são registrados.",
+                ValueLabel = "Margem para os produtos novos (%)", ConfirmText = "Importar e dar entrada no estoque",
+            }, async p =>
+            {
+                var markup = decimal.TryParse(p.Value.Replace("%", "").Trim(), System.Globalization.NumberStyles.Number, AppServices.PtBr, out var m) ? m : 50m;
+                try
+                {
+                    var r = await S.Api.PostAsync("/api/v1/purchases/nfe/import", new { xml, storeId = S.Settings.StoreId, markupPercent = markup, createMissing = true });
+                    await LoadAsync();
+                    Summary = $"NF-e importada: {r.GetProperty("created").GetInt32()} produto(s) novo(s), {r.GetProperty("updated").GetInt32()} atualizado(s).";
+                    return true;
+                }
+                catch (ApiException ex) { p.Error = ex.Code == "already_imported" ? "Esta NF-e já foi importada." : "Falha: " + ex.Code; }
+                catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
+                return false;
+            });
+        }
+        catch (ApiException ex) { Error = ex.Code == "invalid_xml" ? "O arquivo não é um XML de NF-e válido." : "Falha: " + ex.Code; }
+        catch (HttpRequestException) { Error = "Sem conexão com o servidor."; }
+    }
+
+    private async Task ImportCsvAsync(string csv)
+    {
+        try
+        {
+            var r = await S.Api.PostAsync("/api/v1/products/import-csv", new { csv, storeId = S.Settings.StoreId });
+            await LoadAsync();
+            var errors = r.GetProperty("errors").EnumerateArray().Select(e => e.GetString()).ToList();
+            Summary = $"Planilha: {r.GetProperty("created").GetInt32()} novo(s), {r.GetProperty("updated").GetInt32()} atualizado(s)" + (errors.Count > 0 ? $", {errors.Count} linha(s) com erro." : ".");
+            if (errors.Count > 0) Error = string.Join(" • ", errors.Take(5)) + (errors.Count > 5 ? " ..." : "");
+        }
+        catch (ApiException ex) { Error = ex.Code == "invalid_csv" ? "Planilha inválida: precisa das colunas sku; nome; preco (separadas por ponto e vírgula)." : "Falha: " + ex.Code; }
+        catch (HttpRequestException) { Error = "Sem conexão com o servidor."; }
+    }
+
+    public RelayCommand ExpiringCommand => new(async _ =>
+    {
+        try
+        {
+            var list = (await S.Api.GetAsync("/api/v1/stock/expiring?days=30")).EnumerateArray().ToList();
+            var text = list.Count == 0 ? "Nenhum lote vence nos próximos 30 dias."
+                : string.Join("\n", list.Take(15).Select(b => $"{(b.GetProperty("expired").GetBoolean() ? "VENCIDO " : "")}{DateOnly.Parse(b.GetProperty("expiresOn").GetString()!):dd/MM/yyyy} • {b.GetProperty("name").GetString()} • lote {b.GetProperty("batchCode").GetString()} • {b.GetProperty("quantityRemaining").GetDecimal():0.###} un"))
+                  + (list.Count > 15 ? $"\n... e mais {list.Count - 15}" : "");
+            Shell.ShowPrompt(new PromptViewModel { Title = "Validades (próximos 30 dias)", Message = text, ConfirmText = "Fechar" }, _ => Task.FromResult(true));
+        }
+        catch (ApiException ex) { Error = "Falha: " + ex.Code; }
+        catch (HttpRequestException) { Error = "Sem conexão com o servidor."; }
+    });
+
+    public RelayCommand TransferCommand => new(async _ =>
+    {
+        var stores = (await S.Api.GetAsync("/api/v1/stores")).EnumerateArray().Where(s => s.GetProperty("id").GetGuid() != S.Settings.StoreId)
+            .Select(s => (Id: s.GetProperty("id").GetGuid(), Name: s.GetProperty("name").GetString()!)).ToList();
+        if (stores.Count == 0) { Error = "Sua empresa tem só uma loja: não há para onde transferir."; return; }
+        var f = new FormViewModel { Title = "Transferir para outra loja", Message = "Sai desta loja e entra na outra na mesma hora. Itens: SKU*quantidade separados por ponto e vírgula.", ConfirmText = "Transferir" };
+        f.Fields.Add(new FormField("to", "Loja de destino", stores[0].Name, options: stores.Select(s => s.Name).ToList()));
+        f.Fields.Add(new FormField("items", "Itens", "", Icons.Box, "SKU*quantidade; SKU*quantidade"));
+        f.Fields.Add(new FormField("notes", "Observação", "", Icons.Edit, "opcional"));
+        Shell.ShowForm(f, async form =>
+        {
+            var items = new List<object>();
+            foreach (var part in form["items"].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var bits = part.Split('*', StringSplitOptions.TrimEntries);
+                var hit = S.Db.SearchProducts(bits[0], 5).FirstOrDefault(h => h.Sku == bits[0] || h.Barcode == bits[0]);
+                if (hit.Id == Guid.Empty || bits.Length < 2 || !TryQty(bits[1], out var q) || q <= 0) { form.Error = $"Item inválido: {part}"; return false; }
+                items.Add(new { productId = hit.Id, quantity = q });
+            }
+            if (items.Count == 0) { form.Error = "Informe os itens."; return false; }
+            try
+            {
+                var r = await S.Api.PostAsync("/api/v1/stock/transfers", new { fromStoreId = S.Settings.StoreId, toStoreId = stores.First(s => s.Name == form["to"]).Id, items, notes = form["notes"] });
+                await LoadAsync();
+                Summary = $"Transferência nº {r.GetProperty("number").GetInt32()} registrada.";
+                return true;
+            }
+            catch (ApiException ex) { form.Error = "Falha: " + ex.Code; }
+            catch (HttpRequestException) { form.Error = "Sem conexão com o servidor."; }
+            return false;
+        });
+    }, _ => S.Session.Can("stock.adjust"));
+
+    private static readonly string[] MoreOptions = ["Gerar grade (tamanho/cor)", "Montar kit (combo)", "Códigos de barras extras"];
+    public RelayCommand MoreCommand => RelayCommand.Sync(p =>
+    {
+        if (p is not StockRow row) return;
+        var f = new FormViewModel { Title = row.Name, Message = "O que você quer fazer com este produto?", ConfirmText = "Continuar" };
+        f.Fields.Add(new FormField("what", "Ação", MoreOptions[0], options: MoreOptions));
+        Shell.ShowForm(f, form =>
+        {
+            var what = Array.IndexOf(MoreOptions, form["what"]);
+            Shell.Form = null;
+            if (what == 0) GradeForm(row); else if (what == 1) KitForm(row); else CodesForm(row);
+            return Task.FromResult(false);
+        });
+    }, _ => CanWrite);
+
+    private void GradeForm(StockRow row)
+    {
+        var f = new FormViewModel { Title = "Grade de " + row.Name, Message = "Cria uma variação para cada combinação, com estoque e código próprios. Ex.: Tamanho = P, M, G e Cor = Azul, Preto → 6 variações.", ConfirmText = "Gerar variações" };
+        f.Fields.Add(new FormField("a1", "Atributo 1", "Tamanho", Icons.Edit));
+        f.Fields.Add(new FormField("v1", "Valores do atributo 1 (separados por vírgula)", "", Icons.Edit, "P, M, G, GG"));
+        f.Fields.Add(new FormField("a2", "Atributo 2 (opcional)", "Cor", Icons.Edit));
+        f.Fields.Add(new FormField("v2", "Valores do atributo 2", "", Icons.Edit, "Azul, Preto"));
+        f.Fields.Add(new FormField("price", "Preço das variações (vazio = o mesmo do produto)", "", Icons.Money));
+        Shell.ShowForm(f, async form =>
+        {
+            static List<string> Vals(string s) => s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            var attrs = new Dictionary<string, List<string>>();
+            if (form["a1"].Length > 0 && Vals(form["v1"]).Count > 0) attrs[form["a1"]] = Vals(form["v1"]);
+            if (form["a2"].Length > 0 && Vals(form["v2"]).Count > 0) attrs[form["a2"]] = Vals(form["v2"]);
+            if (attrs.Count == 0) { form.Error = "Informe pelo menos um atributo com valores."; return false; }
+            long? price = null;
+            if (form["price"].Length > 0) { if (!PromptViewModel.TryMoney(form["price"], out var pc)) { form.Error = "Preço inválido."; return false; } price = pc; }
+            try
+            {
+                var r = await S.Api.PostAsync($"/api/v1/products/{row.ProductId}/variants", new { attributes = attrs, priceCents = price });
+                await LoadAsync();
+                return true;
+            }
+            catch (ApiException ex) { form.Error = ex.Code == "sku_taken" ? "Já existe produto com um dos códigos gerados." : "Falha: " + ex.Code; }
+            catch (HttpRequestException) { form.Error = "Sem conexão com o servidor."; }
+            return false;
+        });
+    }
+
+    private void KitForm(StockRow row)
+    {
+        var f = new FormViewModel { Title = "Kit: " + row.Name, Message = "Vender o kit baixa o estoque dos componentes. Informe SKU*quantidade separados por ponto e vírgula. Ex.: SHA01*1; CON01*2", ConfirmText = "Salvar kit" };
+        f.Fields.Add(new FormField("items", "Componentes", "", Icons.Box, "SKU*quantidade; SKU*quantidade"));
+        Shell.ShowForm(f, async form =>
+        {
+            var list = new List<object>();
+            foreach (var part in form["items"].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var bits = part.Split('*', StringSplitOptions.TrimEntries);
+                var qty = bits.Length > 1 && decimal.TryParse(bits[1], System.Globalization.NumberStyles.Number, AppServices.PtBr, out var q) ? q : 1m;
+                var hit = S.Db.SearchProducts(bits[0], 5).FirstOrDefault(h => h.Sku == bits[0] || h.Barcode == bits[0]);
+                if (hit.Id == Guid.Empty) { form.Error = $"Componente \"{bits[0]}\" não encontrado."; return false; }
+                list.Add(new { productId = hit.Id, quantity = qty });
+            }
+            try
+            {
+                await S.Api.PutAsync($"/api/v1/products/{row.ProductId}/components", list);
+                await LoadAsync();
+                return true;
+            }
+            catch (ApiException ex) { form.Error = ex.Code == "invalid_kit" ? "Kit inválido: componentes precisam ser produtos simples e diferentes do kit." : "Falha: " + ex.Code; }
+            catch (HttpRequestException) { form.Error = "Sem conexão com o servidor."; }
+            return false;
+        });
+    }
+
+    private void CodesForm(StockRow row) => Shell.ShowPrompt(new PromptViewModel
+    {
+        Title = "Código de barras extra", Message = $"Adicione outro código para {row.Name} (ex.: código da caixa ou do fornecedor). Para remover, comece com - (ex.: -7891234567890).",
+        TextLabel = "Código", ConfirmText = "Salvar",
+    }, async p =>
+    {
+        var code = p.Text.Trim();
+        try
+        {
+            if (code.StartsWith('-')) await S.Api.PostAsync($"/api/v1/products/{row.ProductId}/barcodes/remove", new { code = code[1..] });
+            else await S.Api.PostAsync($"/api/v1/products/{row.ProductId}/barcodes", new { code });
+            return true;
+        }
+        catch (ApiException ex) { p.Error = ex.Code == "barcode_taken" ? "Este código já pertence a outro produto." : ex.Code == "invalid_barcode" ? "Código inválido." : "Falha: " + ex.Code; }
+        catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
+        return false;
+    });
+
+    /// <summary>Etiquetas de gôndola dos produtos listados (filtro atual) na impressora de etiquetas (ZPL).</summary>
+    public RelayCommand LabelsCommand => RelayCommand.Sync(_ => Shell.ShowPrompt(new PromptViewModel
+    {
+        Title = "Imprimir etiquetas", Message = $"{Items.Count} produto(s) da lista atual (use a busca para filtrar). Impressora: {S.Settings.Devices.LabelPrinterName ?? "não configurada — veja Dispositivos"}.",
+        ValueLabel = "Cópias de cada etiqueta", ConfirmText = "Imprimir",
+    }, p =>
+    {
+        if (string.IsNullOrWhiteSpace(S.Settings.Devices.LabelPrinterName)) { p.Error = "Configure a impressora de etiquetas em Dispositivos."; return Task.FromResult(false); }
+        var copies = int.TryParse(p.Value.Trim(), out var c) && c is > 0 and <= 50 ? c : 1;
+        try
+        {
+            var zpl = Comercial.Desktop.Core.Hardware.LabelZpl.Build(Items.Take(500).Select(r => new Comercial.Desktop.Core.Hardware.LabelItem(r.Name, r.PriceCents, r.Barcode, r.Unit)), copies: copies);
+            RawPrinter.Send(S.Settings.Devices.LabelPrinterName!, System.Text.Encoding.UTF8.GetBytes(zpl), "Etiquetas");
+            return Task.FromResult(true);
+        }
+        catch (InvalidOperationException ex) { p.Error = ex.Message; return Task.FromResult(false); }
+    }), _ => Items.Count > 0);
     public string Filter { get => _filter; set { if (Set(ref _filter, value)) Apply(); } }
     public bool OnlyLow { get => _onlyLow; set { if (Set(ref _onlyLow, value)) Apply(); } }
     public string Summary { get => _summary; set => Set(ref _summary, value); }
@@ -426,7 +655,12 @@ public sealed class StockViewModel : OwnerPage
         SetRows(rows.EnumerateArray().Select(r => new StockRow(r.GetProperty("productId").GetGuid(), r.GetProperty("name").GetString()!, r.GetProperty("sku").GetString()!,
             r.TryGetProperty("barcode", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null,
             r.GetProperty("quantity").GetDecimal(), r.GetProperty("minStock").GetDecimal(), r.GetProperty("priceCents").GetInt64(),
-            r.GetProperty("costCents").GetInt64(), r.GetProperty("hasImage").GetBoolean())));
+            r.GetProperty("costCents").GetInt64(), r.GetProperty("hasImage").GetBoolean())
+        {
+            Unit = Str(r, "unit") ?? "UN", Ncm = Str(r, "ncm"), Cest = Str(r, "cest"), Cfop = Str(r, "cfop"),
+            FiscalOrigin = r.TryGetProperty("fiscalOrigin", out var fo) && fo.ValueKind == JsonValueKind.Number ? fo.GetInt32() : 0,
+            IcmsCst = Str(r, "icmsCst"), IbsCbsCst = Str(r, "ibsCbsCst"), IbsCbsClass = Str(r, "ibsCbsClass"),
+        }));
         foreach (var r in _all.Where(r => r.HasImage)) _ = LoadThumbAsync(r);
     }
 
@@ -452,6 +686,9 @@ public sealed class StockViewModel : OwnerPage
             Items.Add(r);
     }
 
+    private static string? Str(JsonElement e, string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    private static readonly string[] Units = ["UN", "KG", "G", "L", "ML", "M", "CX", "PC"];
+
     private static bool TryQty(string s, out decimal v) => decimal.TryParse(s, System.Globalization.NumberStyles.Number, AppServices.PtBr, out v) && v >= 0;
 
     /// <summary>Cadastro (row = null) ou edição de produto, com foto opcional.</summary>
@@ -469,6 +706,9 @@ public sealed class StockViewModel : OwnerPage
         f.Fields.Add(new FormField("price", "Preço de venda (R$)", row is null ? "" : (row.PriceCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
         f.Fields.Add(new FormField("cost", "Custo (R$)", row is null ? "" : (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
         f.Fields.Add(new FormField("min", "Estoque mínimo", row?.Min ?? "5", Icons.Box));
+        f.Fields.Add(new FormField("unit", "Unidade", row?.Unit ?? "UN", options: Units));
+        f.Fields.Add(new FormField("ncm", "NCM (8 dígitos — obrigatório para NFC-e)", row?.Ncm ?? "", Icons.Edit, "ex.: 61091000"));
+        f.Fields.Add(new FormField("cest", "CEST (se houver substituição tributária)", row?.Cest ?? "", Icons.Edit, "opcional"));
         if (row is null) f.Fields.Add(new FormField("qty", "Quantidade inicial na loja", "", Icons.Add, "0"));
         if (row?.Thumb is System.Windows.Media.Imaging.BitmapImage thumb) f.Preview = thumb;
 
@@ -479,10 +719,23 @@ public sealed class StockViewModel : OwnerPage
             if (!TryQty(form["min"].Length == 0 ? "0" : form["min"], out var min)) { form.Error = "Estoque mínimo inválido."; return false; }
             decimal qty = 0;
             if (row is null && form["qty"].Length > 0 && !TryQty(form["qty"], out qty)) { form.Error = "Quantidade inicial inválida."; return false; }
-            var body = new { sku = form["sku"], barcode = form["barcode"].Length == 0 ? null : form["barcode"], name = form["name"], unit = "UN", priceCents = price, costCents = cost, minStock = min };
+            var body = new
+            {
+                sku = form["sku"], barcode = form["barcode"].Length == 0 ? null : form["barcode"], name = form["name"], unit = form["unit"], priceCents = price, costCents = cost, minStock = min,
+                ncm = form["ncm"].Length == 0 ? null : form["ncm"], cest = form["cest"].Length == 0 ? null : form["cest"],
+                cfop = row?.Cfop, fiscalOrigin = row?.FiscalOrigin ?? 0, icmsCst = row?.IcmsCst, ibsCbsCst = row?.IbsCbsCst, ibsCbsClass = row?.IbsCbsClass,
+            };
             Guid id;
-            if (row is null) id = (await S.Api.PostAsync("/api/v1/products", body)).GetProperty("id").GetGuid();
-            else { await S.Api.PutAsync($"/api/v1/products/{row.ProductId}", body); id = row.ProductId; }
+            try
+            {
+                if (row is null) id = (await S.Api.PostAsync("/api/v1/products", body)).GetProperty("id").GetGuid();
+                else { await S.Api.PutAsync($"/api/v1/products/{row.ProductId}", body); id = row.ProductId; }
+            }
+            catch (ApiException ex) when (ex.Code is "invalid_fiscal" or "sku_taken" or "invalid_unit")
+            {
+                form.Error = ex.Code switch { "sku_taken" => "Já existe produto com este código interno.", "invalid_fiscal" => "NCM deve ter 8 dígitos e CEST 7 dígitos.", _ => "Unidade inválida." };
+                return false;
+            }
             if (qty > 0)
                 await S.Api.PostAsync("/api/v1/stock/entries", new { storeId = S.Settings.StoreId, productId = id, quantity = qty, unitCostCents = cost, reason = "estoque inicial" });
             if (form.ImagePath is { } path)
@@ -498,11 +751,23 @@ public sealed class StockViewModel : OwnerPage
         f.Fields.Add(new FormField("qty", "Quantidade recebida", "", Icons.Add));
         f.Fields.Add(new FormField("cost", "Custo unitário (R$)", (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
         f.Fields.Add(new FormField("reason", "Nota fiscal / fornecedor", "", Icons.Edit, "opcional"));
+        f.Fields.Add(new FormField("batch", "Lote", "", Icons.Edit, "opcional"));
+        f.Fields.Add(new FormField("expires", "Validade (dd/mm/aaaa)", "", Icons.Edit, "opcional — gera aviso antes de vencer"));
         Shell.ShowForm(f, async form =>
         {
             if (!TryQty(form["qty"], out var qty) || qty <= 0) { form.Error = "Informe a quantidade recebida."; return false; }
             if (!PromptViewModel.TryMoney(form["cost"], out var cost)) { form.Error = "Custo inválido."; return false; }
-            await S.Api.PostAsync("/api/v1/stock/entries", new { storeId = S.Settings.StoreId, productId = row.ProductId, quantity = qty, unitCostCents = cost, reason = form["reason"].Length == 0 ? "entrada de mercadoria" : form["reason"] });
+            DateOnly? expires = null;
+            if (form["expires"].Length > 0)
+            {
+                if (!DateOnly.TryParseExact(form["expires"], "dd/MM/yyyy", AppServices.PtBr, System.Globalization.DateTimeStyles.None, out var ex)) { form.Error = "Validade no formato dd/mm/aaaa."; return false; }
+                expires = ex;
+            }
+            await S.Api.PostAsync("/api/v1/stock/entries", new
+            {
+                storeId = S.Settings.StoreId, productId = row.ProductId, quantity = qty, unitCostCents = cost, reason = form["reason"].Length == 0 ? "entrada de mercadoria" : form["reason"],
+                batchCode = form["batch"].Length == 0 ? null : form["batch"], expiresOn = expires?.ToString("yyyy-MM-dd"),
+            });
             await LoadAsync();
             return true;
         });

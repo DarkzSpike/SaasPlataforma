@@ -165,4 +165,25 @@ public class PushTests(PushFactory f) : IClassFixture<PushFactory>
         Assert.Equal(PushStatus.Sent, n[0].GetProperty("pushStatus").GetString());
         Assert.False(await f.WithDb(db => db.PushTokens.IgnoreQueryFilters().AnyAsync(x => x.Token == "invalido-antigo")));
     }
+
+    [Fact]
+    public async Task Sangria_envia_push_ao_dono_com_valor_e_motivo()
+    {
+        var api = new Api(f);
+        var t = await api.CreateTenant("sang-" + Guid.NewGuid().ToString("N")[..6]);
+        await Api.Expect(await api.Post("/api/v1/push/tokens", t.OwnerToken, new { token = "celular-dono-sangria", platform = "android" }), HttpStatusCode.NoContent);
+        var (_, op, _) = await api.CreateUser(t, "operator");
+        var cash = await api.OpenCash(op, t.StoreId, 20000);
+
+        await Api.Expect(await api.Post($"/api/v1/cash/sessions/{cash}/withdrawal", op, new { amountCents = 15000, reason = "levar ao cofre" }), HttpStatusCode.OK);
+
+        var sent = Assert.Single(f.Push.Sent, s => s.Token == "celular-dono-sangria");
+        Assert.Contains("150,00", sent.Title);
+        var n = (await Api.Expect(await api.Get("/api/v1/notifications", t.OwnerToken), HttpStatusCode.OK)).EnumerateArray()
+            .Single(x => x.GetProperty("type").GetString() == "cash.withdrawal");
+        Assert.Contains("levar ao cofre", n.GetProperty("body").GetString());
+        Assert.Contains("50,00", n.GetProperty("body").GetString()); // saldo que ficou na gaveta
+        Assert.Equal(PushStatus.Sent, n.GetProperty("pushStatus").GetString());
+        Assert.Equal(0, (await Api.Expect(await api.Get("/api/v1/notifications", op), HttpStatusCode.OK)).GetArrayLength());
+    }
 }

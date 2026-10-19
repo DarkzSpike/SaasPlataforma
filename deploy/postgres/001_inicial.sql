@@ -1521,3 +1521,987 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018222639_ArmazenamentoPorEmpresa') THEN
+    CREATE TABLE tenant_storage_settings (
+        "TenantId" uuid NOT NULL,
+        "Provider" character varying(20) NOT NULL,
+        "DriveFolderId" character varying(200),
+        "ImpersonateUser" character varying(200),
+        "CredentialsProtected" text,
+        "CredentialsClientEmail" character varying(320),
+        "Version" integer NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        "UpdatedByAdminId" uuid,
+        "LastTestAt" timestamp with time zone,
+        "LastTestOk" boolean,
+        "LastTestMessage" character varying(500),
+        CONSTRAINT "PK_tenant_storage_settings" PRIMARY KEY ("TenantId"),
+        CONSTRAINT "FK_tenant_storage_settings_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018222639_ArmazenamentoPorEmpresa') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261018222639_ArmazenamentoPorEmpresa', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE tenants ADD "SupportPreAuthorizedAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE tenants ADD "SupportPreAuthorizedByUserId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE tenants ADD "SupportPreAuthorizedOperations" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "AvailableNotifiedAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "CheckoutPreferenceId" character varying(80);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "CheckoutUrl" character varying(500);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "CreatedAt" timestamp with time zone NOT NULL DEFAULT TIMESTAMPTZ '-infinity';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "MpPaymentId" character varying(40);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "Origin" character varying(10) NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "PaidMethod" character varying(20);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "PixCopyPaste" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "PixExpiresAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "PixQrBase64" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    ALTER TABLE invoices ADD "ReminderSentAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    CREATE TABLE platform_settings (
+        "Key" character varying(100) NOT NULL,
+        "Value" text,
+        "IsSecret" boolean NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        "UpdatedByAdminId" uuid,
+        CONSTRAINT "PK_platform_settings" PRIMARY KEY ("Key")
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    CREATE INDEX "IX_invoices_Status_DueAt" ON invoices ("Status", "DueAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    CREATE UNIQUE INDEX "IX_invoices_TenantId_SubscriptionId_PeriodStart" ON invoices ("TenantId", "SubscriptionId", "PeriodStart") WHERE "Status" <> 3;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261018225239_FaturasMercadoPagoSuporte') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261018225239_FaturasMercadoPagoSuporte', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019000421_AutorizacaoDescontoFuncionarios') THEN
+    ALTER TABLE sales ADD "DiscountAuthorizedByUserId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019000421_AutorizacaoDescontoFuncionarios') THEN
+    CREATE TABLE discount_authorizations (
+        "Id" uuid NOT NULL,
+        "ApproverUserId" uuid NOT NULL,
+        "RequestedByUserId" uuid NOT NULL,
+        "MaxDiscountCents" bigint NOT NULL,
+        "SubtotalCents" bigint NOT NULL,
+        "Reason" character varying(200) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ExpiresAt" timestamp with time zone NOT NULL,
+        "UsedBySaleId" uuid,
+        "UsedAt" timestamp with time zone,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_discount_authorizations" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_discount_authorizations_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019000421_AutorizacaoDescontoFuncionarios') THEN
+    CREATE INDEX "IX_discount_authorizations_TenantId_CreatedAt" ON discount_authorizations ("TenantId", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019000421_AutorizacaoDescontoFuncionarios') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019000421_AutorizacaoDescontoFuncionarios', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192355_EmailERedefinicaoSenha') THEN
+    CREATE TABLE email_messages (
+        "Id" uuid NOT NULL,
+        "TenantId" uuid,
+        "To" character varying(320) NOT NULL,
+        "Subject" character varying(300) NOT NULL,
+        "HtmlBody" text NOT NULL,
+        "Kind" character varying(40) NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "Attempts" integer NOT NULL,
+        "LastError" character varying(300),
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "SentAt" timestamp with time zone,
+        "NextAttemptAt" timestamp with time zone,
+        CONSTRAINT "PK_email_messages" PRIMARY KEY ("Id")
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192355_EmailERedefinicaoSenha') THEN
+    CREATE TABLE password_reset_tokens (
+        "Id" uuid NOT NULL,
+        "UserId" uuid NOT NULL,
+        "CodeHash" character varying(64) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ExpiresAt" timestamp with time zone NOT NULL,
+        "Attempts" integer NOT NULL,
+        "UsedAt" timestamp with time zone,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_password_reset_tokens" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_password_reset_tokens_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192355_EmailERedefinicaoSenha') THEN
+    CREATE INDEX "IX_email_messages_Status_NextAttemptAt" ON email_messages ("Status", "NextAttemptAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192355_EmailERedefinicaoSenha') THEN
+    CREATE INDEX "IX_password_reset_tokens_TenantId_UserId_CreatedAt" ON password_reset_tokens ("TenantId", "UserId", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192355_EmailERedefinicaoSenha') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019192355_EmailERedefinicaoSenha', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192927_PixNoCaixa') THEN
+    CREATE TABLE pos_pix_charges (
+        "Id" uuid NOT NULL,
+        "CashSessionId" uuid NOT NULL,
+        "RequestedByUserId" uuid NOT NULL,
+        "AmountCents" bigint NOT NULL,
+        "MpPaymentId" character varying(40) NOT NULL,
+        "QrCode" text NOT NULL,
+        "QrBase64" text NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ExpiresAt" timestamp with time zone NOT NULL,
+        "ApprovedAt" timestamp with time zone,
+        "UsedBySaleId" uuid,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_pos_pix_charges" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_pos_pix_charges_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192927_PixNoCaixa') THEN
+    CREATE TABLE tenant_payment_settings (
+        "TenantId" uuid NOT NULL,
+        "MpAccessTokenProtected" text,
+        "MpAccountLabel" character varying(200),
+        "PixEnabled" boolean NOT NULL,
+        "Version" integer NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        "UpdatedByUserId" uuid,
+        CONSTRAINT "PK_tenant_payment_settings" PRIMARY KEY ("TenantId"),
+        CONSTRAINT "FK_tenant_payment_settings_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192927_PixNoCaixa') THEN
+    CREATE INDEX "IX_pos_pix_charges_TenantId_CreatedAt" ON pos_pix_charges ("TenantId", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019192927_PixNoCaixa') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019192927_PixNoCaixa', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "Cest" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "Cfop" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "FiscalOrigin" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "IbsCbsClass" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "IbsCbsCst" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "IcmsCst" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE products ADD "Ncm" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "CancelReason" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "CancelledAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "DanfeUrl" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "Environment" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "NextAttemptAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "Number" integer;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "ProviderRef" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "QrCodeUrl" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "Series" integer;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    ALTER TABLE fiscal_documents ADD "XmlUrl" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    CREATE TABLE fiscal_number_voids (
+        "Id" uuid NOT NULL,
+        "Series" integer NOT NULL,
+        "FirstNumber" integer NOT NULL,
+        "LastNumber" integer NOT NULL,
+        "Reason" text NOT NULL,
+        "Status" text NOT NULL,
+        "Protocol" text,
+        "Message" text,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_fiscal_number_voids" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_fiscal_number_voids_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    CREATE TABLE nfse_documents (
+        "Id" uuid NOT NULL,
+        "InvoiceId" uuid NOT NULL,
+        "TenantId" uuid NOT NULL,
+        "AmountCents" bigint NOT NULL,
+        "Status" text NOT NULL,
+        "Number" text,
+        "VerificationCode" text,
+        "PdfUrl" text,
+        "LastMessage" text,
+        "Attempts" integer NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "IssuedAt" timestamp with time zone,
+        CONSTRAINT "PK_nfse_documents" PRIMARY KEY ("Id")
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    CREATE TABLE tenant_fiscal_profiles (
+        "TenantId" uuid NOT NULL,
+        "Cnpj" character varying(14) NOT NULL,
+        "StateRegistration" character varying(20),
+        "Regime" integer NOT NULL,
+        "Uf" character varying(2) NOT NULL,
+        "Environment" integer NOT NULL,
+        "Provider" character varying(20) NOT NULL,
+        "ProviderTokenProtected" text,
+        "NfceSeries" integer NOT NULL,
+        "AutoEmit" boolean NOT NULL,
+        "DefaultCfop" text NOT NULL,
+        "DefaultIcmsCst" text NOT NULL,
+        "DefaultPisCst" text NOT NULL,
+        "DefaultCofinsCst" text NOT NULL,
+        "DefaultIbsCbsCst" text NOT NULL,
+        "DefaultIbsCbsClass" text NOT NULL,
+        "IbsRate" numeric(7,4) NOT NULL,
+        "CbsRate" numeric(7,4) NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        CONSTRAINT "PK_tenant_fiscal_profiles" PRIMARY KEY ("TenantId"),
+        CONSTRAINT "FK_tenant_fiscal_profiles_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    CREATE INDEX "IX_fiscal_number_voids_TenantId" ON fiscal_number_voids ("TenantId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    CREATE UNIQUE INDEX "IX_nfse_documents_InvoiceId" ON nfse_documents ("InvoiceId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019193636_FiscalNfceNfse') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019193636_FiscalNfceNfse', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE sales ADD "CouponCode" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE sales ADD "PromotionDiscountCents" bigint NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE sales ADD "QuoteId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE products ADD "HasVariants" boolean NOT NULL DEFAULT FALSE;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE products ADD "IsKit" boolean NOT NULL DEFAULT FALSE;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE products ADD "ParentProductId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE products ADD "VariantLabel" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE financial_titles ADD "SaleId" uuid;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    ALTER TABLE customers ADD "CreditLimitCents" bigint NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE TABLE product_barcodes (
+        "Id" uuid NOT NULL,
+        "ProductId" uuid NOT NULL,
+        "Code" character varying(32) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_product_barcodes" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_product_barcodes_products_TenantId_ProductId" FOREIGN KEY ("TenantId", "ProductId") REFERENCES products ("TenantId", "Id") ON DELETE CASCADE,
+        CONSTRAINT "FK_product_barcodes_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE TABLE product_components (
+        "Id" uuid NOT NULL,
+        "KitProductId" uuid NOT NULL,
+        "ComponentProductId" uuid NOT NULL,
+        "Quantity" numeric(18,3) NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_product_components" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_product_components_products_TenantId_ComponentProductId" FOREIGN KEY ("TenantId", "ComponentProductId") REFERENCES products ("TenantId", "Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_product_components_products_TenantId_KitProductId" FOREIGN KEY ("TenantId", "KitProductId") REFERENCES products ("TenantId", "Id") ON DELETE CASCADE,
+        CONSTRAINT "FK_product_components_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE TABLE promotions (
+        "Id" uuid NOT NULL,
+        "Name" character varying(80) NOT NULL,
+        "Type" integer NOT NULL,
+        "ProductId" uuid,
+        "BuyQty" integer NOT NULL,
+        "PayQty" integer NOT NULL,
+        "MinQty" numeric(18,3) NOT NULL,
+        "UnitPriceCents" bigint NOT NULL,
+        "Percent" numeric(7,3) NOT NULL,
+        "CouponCode" character varying(30),
+        "StartsAt" timestamp with time zone,
+        "EndsAt" timestamp with time zone,
+        "Active" boolean NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_promotions" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_promotions_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE TABLE quotes (
+        "Id" uuid NOT NULL,
+        "Number" integer NOT NULL,
+        "CustomerId" uuid,
+        "CustomerName" character varying(200),
+        "Notes" character varying(500),
+        "TotalCents" bigint NOT NULL,
+        "ValidUntil" date NOT NULL,
+        "Status" integer NOT NULL,
+        "CreatedByUserId" uuid NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "SaleId" uuid,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_quotes" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_quotes_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE TABLE quote_items (
+        "Id" uuid NOT NULL,
+        "QuoteId" uuid NOT NULL,
+        "ProductId" uuid NOT NULL,
+        "ProductName" character varying(200) NOT NULL,
+        "Quantity" numeric(18,3) NOT NULL,
+        "UnitPriceCents" bigint NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_quote_items" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_quote_items_quotes_QuoteId" FOREIGN KEY ("QuoteId") REFERENCES quotes ("Id") ON DELETE CASCADE,
+        CONSTRAINT "FK_quote_items_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE UNIQUE INDEX "IX_product_barcodes_TenantId_Code" ON product_barcodes ("TenantId", "Code");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE INDEX "IX_product_barcodes_TenantId_ProductId" ON product_barcodes ("TenantId", "ProductId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE INDEX "IX_product_components_TenantId_ComponentProductId" ON product_components ("TenantId", "ComponentProductId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE UNIQUE INDEX "IX_product_components_TenantId_KitProductId_ComponentProductId" ON product_components ("TenantId", "KitProductId", "ComponentProductId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE INDEX "IX_promotions_TenantId" ON promotions ("TenantId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE INDEX "IX_quote_items_QuoteId" ON quote_items ("QuoteId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE INDEX "IX_quote_items_TenantId" ON quote_items ("TenantId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    CREATE UNIQUE INDEX "IX_quotes_TenantId_Number" ON quotes ("TenantId", "Number");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019195049_GradeKitsPromocoesFiadoOrcamentos') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019195049_GradeKitsPromocoesFiadoOrcamentos', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE TABLE imported_invoices (
+        "Id" uuid NOT NULL,
+        "AccessKey" character varying(44) NOT NULL,
+        "Number" character varying(20) NOT NULL,
+        "SupplierId" uuid,
+        "SupplierName" character varying(200) NOT NULL,
+        "StoreId" uuid NOT NULL,
+        "TotalCents" bigint NOT NULL,
+        "Items" integer NOT NULL,
+        "ImportedByUserId" uuid NOT NULL,
+        "ImportedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_imported_invoices" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_imported_invoices_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE TABLE product_batches (
+        "Id" uuid NOT NULL,
+        "ProductId" uuid NOT NULL,
+        "StoreId" uuid NOT NULL,
+        "BatchCode" character varying(40) NOT NULL,
+        "ExpiresOn" date,
+        "QuantityReceived" numeric(18,3) NOT NULL,
+        "QuantityRemaining" numeric(18,3) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "AlertedAt" timestamp with time zone,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_product_batches" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_product_batches_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE TABLE stock_transfers (
+        "Id" uuid NOT NULL,
+        "Number" integer NOT NULL,
+        "FromStoreId" uuid NOT NULL,
+        "ToStoreId" uuid NOT NULL,
+        "Notes" character varying(300),
+        "CreatedByUserId" uuid NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_stock_transfers" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_stock_transfers_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE TABLE stock_transfer_items (
+        "Id" uuid NOT NULL,
+        "TransferId" uuid NOT NULL,
+        "ProductId" uuid NOT NULL,
+        "Quantity" numeric(18,3) NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_stock_transfer_items" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_stock_transfer_items_stock_transfers_TransferId" FOREIGN KEY ("TransferId") REFERENCES stock_transfers ("Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_stock_transfer_items_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE UNIQUE INDEX "IX_imported_invoices_TenantId_AccessKey" ON imported_invoices ("TenantId", "AccessKey");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE INDEX "IX_product_batches_TenantId_StoreId_ProductId_ExpiresOn" ON product_batches ("TenantId", "StoreId", "ProductId", "ExpiresOn");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE INDEX "IX_stock_transfer_items_TenantId" ON stock_transfer_items ("TenantId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE INDEX "IX_stock_transfer_items_TransferId" ON stock_transfer_items ("TransferId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    CREATE UNIQUE INDEX "IX_stock_transfers_TenantId_Number" ON stock_transfers ("TenantId", "Number");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200021_LotesTransferenciasImportacoes') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019200021_LotesTransferenciasImportacoes', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200526_RelatoriosComissao') THEN
+    ALTER TABLE users ADD "CommissionPercent" numeric(5,2) NOT NULL DEFAULT 0.0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019200526_RelatoriosComissao') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019200526_RelatoriosComissao', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    ALTER TABLE users ADD "TotpEnabled" boolean NOT NULL DEFAULT FALSE;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    ALTER TABLE users ADD "TotpLastStep" bigint;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    ALTER TABLE users ADD "TotpSecretProtected" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    CREATE TABLE pending_signups (
+        "Id" uuid NOT NULL,
+        "Email" character varying(200) NOT NULL,
+        "TenantCode" character varying(40) NOT NULL,
+        "PayloadProtected" text NOT NULL,
+        "CodeHash" character varying(64) NOT NULL,
+        "Attempts" integer NOT NULL,
+        "Ip" character varying(60),
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "ExpiresAt" timestamp with time zone NOT NULL,
+        "CompletedAt" timestamp with time zone,
+        CONSTRAINT "PK_pending_signups" PRIMARY KEY ("Id")
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    CREATE INDEX "IX_pending_signups_Email_CreatedAt" ON pending_signups ("Email", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    CREATE INDEX "IX_pending_signups_TenantCode" ON pending_signups ("TenantCode");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261019201054_CadastroTesteGratis2FA') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261019201054_CadastroTesteGratis2FA', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+

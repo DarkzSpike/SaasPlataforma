@@ -21,6 +21,17 @@
             <DataTemplate DataType="{x:Type local:FinanceViewModel}"><views:FinanceView/></DataTemplate>
             <DataTemplate DataType="{x:Type local:PendingViewModel}"><views:PendingView/></DataTemplate>
             <DataTemplate DataType="{x:Type local:AlertsViewModel}"><views:AlertsView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:InvoicesViewModel}"><views:InvoicesView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:SupportViewModel}"><views:SupportView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:EmployeesViewModel}"><views:EmployeesView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:StorePaymentsViewModel}"><views:StorePaymentsView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:FiscalViewModel}"><views:FiscalView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:DevicesViewModel}"><views:DevicesView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:AccountViewModel}"><views:AccountView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:HelpViewModel}"><views:HelpView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:PromotionsViewModel}"><views:PromotionsView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:QuotesViewModel}"><views:QuotesView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:ReportsViewModel}"><views:ReportsView/></DataTemplate>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

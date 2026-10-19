@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/dev-data/
+artifacts/
+mobile/
+tests/
+.git/
+.vs/
+dev/*.local.*
+*.local.txt
+deploy/docker/.env
+deploy/docker/secrets/
+deploy/docker/backups/

@@ -128,7 +128,8 @@ public sealed class GoogleDriveProductImageStore : IProductImageStore
 }
 
 public sealed class ProductImageService(
-    AppDbContext db, IEnumerable<IProductImageStore> stores, IConfiguration config, AuditService audit, RequestActor actor, ScopedLookup lookup)
+    AppDbContext db, IEnumerable<IProductImageStore> stores, IConfiguration config, AuditService audit, RequestActor actor, ScopedLookup lookup,
+    TenantStorageService tenantStorage)
 {
     public const long MaxBytes = 5 * 1024 * 1024;
     private IProductImageStore Active =>
@@ -146,15 +147,18 @@ public sealed class ProductImageService(
         if (info.Width < 32 || info.Height < 32 || info.Width > 8000 || info.Height > 8000)
             throw new DomainException("invalid_dimensions", "A foto deve ter entre 32 e 8000 pixels de lado.");
         var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == actor.TenantId, ct);
-        var store = Active;
-        var key = await store.SaveAsync(tenant, product, bytes, info.ContentType, ct);
+        // Empresa com Google Drive próprio configurado no painel: grava na pasta dela; senão, no armazenamento padrão do servidor.
+        var own = await tenantStorage.ActiveForCurrentTenantAsync(ct);
+        string key, provider;
+        if (own is not null) { key = await tenantStorage.SaveImageAsync(own, tenant, product, bytes, info.ContentType, ct); provider = "gdrive-empresa"; }
+        else { var store = Active; key = await store.SaveAsync(tenant, product, bytes, info.ContentType, ct); provider = store.Prefix.TrimEnd(':'); }
         var previous = product.ImageKey;
         product.ImageKey = key;
         product.ImageContentType = info.ContentType;
         product.ImageUpdatedAt = DateTimeOffset.UtcNow;
         product.Version++;
         audit.Add("product.image_uploaded", actor.TenantId, nameof(Product), product.Id,
-            new { previous, key, info.Width, info.Height, size = bytes.Length, sha256 = Hashing.Sha256Hex(bytes), provider = store.Prefix.TrimEnd(':') });
+            new { previous, key, info.Width, info.Height, size = bytes.Length, sha256 = Hashing.Sha256Hex(bytes), provider });
         await db.SaveChangesAsync(ct);
         return product;
     }
@@ -163,6 +167,11 @@ public sealed class ProductImageService(
     {
         var product = await lookup.GetAsync<Product>(productId);
         if (product.ImageKey is null) return null;
+        if (product.ImageKey.StartsWith(TenantStorageService.TenantDrivePrefix, StringComparison.Ordinal))
+        {
+            var own = await tenantStorage.ReadImageAsync(product.ImageKey, ct);
+            return own is null ? null : (own, product.ImageContentType ?? "image/jpeg");
+        }
         var store = stores.FirstOrDefault(s => product.ImageKey.StartsWith(s.Prefix, StringComparison.Ordinal));
         if (store is null) return null;
         var bytes = await store.ReadAsync(actor.TenantId, product.ImageKey, ct);

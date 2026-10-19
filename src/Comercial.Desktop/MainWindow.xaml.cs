@@ -15,5 +15,10 @@ public partial class MainWindow : Window
             if (((MainViewModel)DataContext).Current is ShellViewModel { Page: PosViewModel pos } && pos.FinishCommand.CanExecute(null))
                 pos.FinishCommand.Execute(null);
         }), Key.F10, ModifierKeys.None));
+        // F1 abre a ajuda.
+        InputBindings.Add(new KeyBinding(RelayCommand.Sync(_ =>
+        {
+            if (((MainViewModel)DataContext).Current is ShellViewModel shell && shell.Nav.FirstOrDefault(n => n.Key == "help") is { } help) shell.SelectedNav = help;
+        }), Key.F1, ModifierKeys.None));
     }
 }

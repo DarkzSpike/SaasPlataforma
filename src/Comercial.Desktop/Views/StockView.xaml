@@ -19,6 +19,10 @@
             <StackPanel Grid.Column="3" Orientation="Horizontal" Visibility="{Binding NormalMode, Converter={StaticResource Vis}}">
                 <Button Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE710;" Content="Novo produto" Margin="0,0,10,0" Command="{Binding NewProductCommand}"/>
                 <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE9D5;" Content="Fazer inventário" Command="{Binding StartInventoryCommand}"/>
+                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8EC;" Content="Etiquetas" Margin="10,0,0,0" Command="{Binding LabelsCommand}" ToolTip="Imprimir etiquetas de gôndola da lista atual"/>
+                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8B5;" Content="Importar" Margin="10,0,0,0" Command="{Binding ImportCommand}" ToolTip="NF-e (XML) do fornecedor ou planilha de produtos"/>
+                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE787;" Content="Validades" Margin="10,0,0,0" Command="{Binding ExpiringCommand}" ToolTip="Lotes que vencem nos próximos 30 dias"/>
+                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8AB;" Content="Transferir" Margin="10,0,0,0" Command="{Binding TransferCommand}" ToolTip="Transferir mercadoria para outra loja"/>
                 <Button Style="{StaticResource DarkButton}" Content="CSV" Margin="10,0,0,0" Command="{Binding ExportCommand}" ToolTip="Exportar estoque em CSV"
                         Visibility="{Binding CanExport, Converter={StaticResource Vis}}"/>
             </StackPanel>
@@ -92,8 +96,10 @@
                                     <StackPanel Orientation="Horizontal" Visibility="{Binding DataContext.NormalMode, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource Vis}}">
                                         <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE710;" Content="Entrada" Height="36" Padding="12,0" Margin="0,0,8,0"
                                                 Command="{Binding DataContext.EntryCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
-                                        <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE722;" Content="Editar / foto" Height="36" Padding="12,0"
+                                        <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE722;" Content="Editar" Height="36" Padding="12,0" Margin="0,0,8,0"
                                                 Command="{Binding DataContext.EditProductCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
+                                        <Button Style="{StaticResource DarkButton}" Content="Mais" Height="36" Padding="12,0" ToolTip="Grade, kit e códigos de barras extras"
+                                                Command="{Binding DataContext.MoreCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Visibility="{Binding DataContext.InventoryMode, RelativeSource={RelativeSource AncestorType=DataGrid}, Converter={StaticResource Vis}}">
                                         <TextBox Style="{StaticResource DarkInput}" Width="120" Height="38" local:Ui.Placeholder="Contado" Text="{Binding Counted, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Quantidade contada"/>

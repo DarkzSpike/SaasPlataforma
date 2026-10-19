@@ -50,6 +50,7 @@ public class SyncAndOfflineTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsy
     public async Task Fluxo_offline_completo_venda_na_fila_sincroniza_uma_unica_vez()
     {
         var (db, guard, client, _) = await Terminal();
+        await api.OpenStore(T.OwnerToken, T.StoreId);
         var cashRes = await client.PostAsync("/api/v1/cash/sessions", new { storeId = T.StoreId, openingCents = 0 });
         var cash = cashRes.GetProperty("id").GetGuid();
         var pos = new PosEngine(db, guard, TimeProvider.System);
@@ -81,6 +82,7 @@ public class SyncAndOfflineTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsy
     public async Task Operacao_rejeitada_fica_guardada_para_revisao_e_nao_e_reenviada()
     {
         var (db, guard, client, _) = await Terminal();
+        await api.OpenStore(T.OwnerToken, T.StoreId);
         var cash = (await client.PostAsync("/api/v1/cash/sessions", new { storeId = T.StoreId, openingCents = 0 })).GetProperty("id").GetGuid();
         var pos = new PosEngine(db, guard, TimeProvider.System);
         // Preço local desatualizado (servidor mudou o preço depois do cache).

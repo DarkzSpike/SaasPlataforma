@@ -72,6 +72,30 @@ public class Invoice : TenantEntity
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Open;
     public DateTimeOffset? PaidAt { get; set; }
     public string? ProviderReference { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>"auto" (gerada pelo sistema antes do vencimento) ou "manual" (painel).</summary>
+    public string Origin { get; set; } = "manual";
+    /// <summary>Forma de pagamento confirmada pelo provedor (pix, boleto, cartão, manual).</summary>
+    public string? PaidMethod { get; set; }
+    // Mercado Pago: PIX gerado (copia e cola + QR) e link do checkout (cartão/boleto).
+    public string? MpPaymentId { get; set; }
+    public string? PixCopyPaste { get; set; }
+    public string? PixQrBase64 { get; set; }
+    public DateTimeOffset? PixExpiresAt { get; set; }
+    public string? CheckoutPreferenceId { get; set; }
+    public string? CheckoutUrl { get; set; }
+    public DateTimeOffset? AvailableNotifiedAt { get; set; }
+    public DateTimeOffset? ReminderSentAt { get; set; }
+}
+
+/// <summary>Configurações da plataforma (ex.: credenciais do Mercado Pago). Segredos ficam criptografados.</summary>
+public class PlatformSetting
+{
+    public string Key { get; set; } = "";
+    public string? Value { get; set; }
+    public bool IsSecret { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? UpdatedByAdminId { get; set; }
 }
 
 /// <summary>Evento recebido do provedor de pagamentos. ProviderEventId único garante idempotência.</summary>

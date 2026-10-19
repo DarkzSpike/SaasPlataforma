@@ -45,6 +45,22 @@ public sealed class AuthService(
             throw Invalid();
         }
 
+        // Verificação em duas etapas: senha certa + código do autenticador (sem reaproveitar o mesmo código).
+        if (user.TotpEnabled && user.TotpSecretProtected is not null)
+        {
+            if (string.IsNullOrWhiteSpace(r.TotpCode)) throw new DomainException("totp_required", "Digite o código do aplicativo autenticador.", 401);
+            var step = Totp.Verify(TotpProtector.Unprotect(user.TotpSecretProtected), r.TotpCode, now);
+            if (step is null || step <= user.TotpLastStep)
+            {
+                user.FailedLoginCount++;
+                if (user.FailedLoginCount >= MaxFailedAttempts) { user.LockoutUntil = now + LockoutDuration; user.FailedLoginCount = 0; }
+                audit.Add("security.login_totp_failed", tenant.Id, nameof(User), user.Id, null, "denied");
+                await db.SaveChangesAsync();
+                throw new DomainException("invalid_totp", "Código do autenticador incorreto.", 401);
+            }
+            user.TotpLastStep = step;
+        }
+
         if (r.DeviceId is { } did && !await db.Devices.AnyAsync(d => d.Id == did && d.Status == DeviceStatus.Active))
         {
             await audit.WriteNowAsync("security.login_revoked_device", tenant.Id, nameof(Device), did);

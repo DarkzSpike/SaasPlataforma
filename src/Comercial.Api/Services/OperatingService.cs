@@ -23,6 +23,9 @@ public sealed class OperatingService(AppDbContext db, RequestActor actor, AuditS
         var dup = await db.OperatingEvents.AsNoTracking().FirstOrDefaultAsync(e => e.IdempotencyKey == r.IdempotencyKey);
         if (dup is not null) return (dup, true);
         await stock.EnsureStoreAccessAsync(r.StoreId);
+        // Regra: a loja só fecha depois que todos os caixas dela forem fechados.
+        if (r.Type == (int)OperatingEventType.Close && await db.CashSessions.AnyAsync(c => c.StoreId == r.StoreId && c.Status == CashSessionStatus.Open))
+            throw new DomainException("cash_open", "Feche todos os caixas desta loja antes de fechar a loja.", 409);
 
         var now = clock.GetUtcNow();
         // Online: horário local deve estar próximo do servidor. Offline: não pode estar no futuro.

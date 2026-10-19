@@ -34,6 +34,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     public DbSet<SupportElevationRequest> SupportElevationRequests => Set<SupportElevationRequest>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<TenantBranding> Brandings => Set<TenantBranding>();
+    public DbSet<TenantStorageSettings> StorageSettings => Set<TenantStorageSettings>();
+    public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
+    public DbSet<DiscountAuthorization> DiscountAuthorizations => Set<DiscountAuthorization>();
+    public DbSet<EmailMessage> EmailMessages => Set<EmailMessage>();
+    public DbSet<TenantPaymentSettings> TenantPaymentSettings => Set<TenantPaymentSettings>();
+    public DbSet<PosPixCharge> PosPixCharges => Set<PosPixCharge>();
+    public DbSet<TenantFiscalProfile> FiscalProfiles => Set<TenantFiscalProfile>();
+    public DbSet<ProductBarcode> ProductBarcodes => Set<ProductBarcode>();
+    public DbSet<ProductBatch> ProductBatches => Set<ProductBatch>();
+    public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
+    public DbSet<StockTransferItem> StockTransferItems => Set<StockTransferItem>();
+    public DbSet<ImportedInvoice> ImportedInvoices => Set<ImportedInvoice>();
+    public DbSet<ProductComponent> ProductComponents => Set<ProductComponent>();
+    public DbSet<Promotion> Promotions => Set<Promotion>();
+    public DbSet<Quote> Quotes => Set<Quote>();
+    public DbSet<QuoteItem> QuoteItems => Set<QuoteItem>();
+    public DbSet<FiscalNumberVoid> FiscalNumberVoids => Set<FiscalNumberVoid>();
+    public DbSet<NfseDocument> NfseDocuments => Set<NfseDocument>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<PendingSignup> PendingSignups => Set<PendingSignup>();
     public DbSet<BrandingVersion> BrandingVersions => Set<BrandingVersion>();
     public DbSet<BrandingAsset> BrandingAssets => Set<BrandingAsset>();
     public DbSet<Category> Categories => Set<Category>();
@@ -181,7 +201,133 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
             e.HasKey(x => new { x.TenantId, x.ModuleKey });
             e.HasOne<ModuleDefinition>().WithMany().HasForeignKey(x => x.ModuleKey).OnDelete(DeleteBehavior.Restrict);
         });
-        m.Entity<Invoice>(e => { e.ToTable("invoices"); e.HasIndex(x => new { x.TenantId, x.Status }); });
+        m.Entity<Invoice>(e =>
+        {
+            e.ToTable("invoices");
+            e.HasIndex(x => new { x.TenantId, x.Status });
+            e.HasIndex(x => new { x.Status, x.DueAt });
+            // Uma fatura válida por período da assinatura: a geração automática nunca duplica cobrança.
+            e.HasIndex(x => new { x.TenantId, x.SubscriptionId, x.PeriodStart }).IsUnique().HasFilter("\"Status\" <> 3");
+            e.Property(x => x.Origin).HasMaxLength(10);
+            e.Property(x => x.PaidMethod).HasMaxLength(20);
+            e.Property(x => x.MpPaymentId).HasMaxLength(40);
+            e.Property(x => x.CheckoutPreferenceId).HasMaxLength(80);
+            e.Property(x => x.CheckoutUrl).HasMaxLength(500);
+        });
+        m.Entity<DiscountAuthorization>(e =>
+        {
+            e.ToTable("discount_authorizations");
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.Property(x => x.Reason).HasMaxLength(200);
+            // Uso único: a gravação só passa se ninguém tiver usado a autorização antes (concorrência otimista).
+            e.Property(x => x.UsedBySaleId).IsConcurrencyToken();
+        });
+        m.Entity<User>().Property(x => x.CommissionPercent).HasPrecision(5, 2);
+        m.Entity<ProductBatch>(e =>
+        {
+            e.ToTable("product_batches");
+            e.HasIndex(x => new { x.TenantId, x.StoreId, x.ProductId, x.ExpiresOn });
+            e.Property(x => x.BatchCode).HasMaxLength(40);
+            e.Property(x => x.QuantityReceived).HasPrecision(18, 3);
+            e.Property(x => x.QuantityRemaining).HasPrecision(18, 3);
+        });
+        m.Entity<StockTransfer>(e =>
+        {
+            e.ToTable("stock_transfers");
+            e.HasIndex(x => new { x.TenantId, x.Number }).IsUnique();
+            e.Property(x => x.Notes).HasMaxLength(300);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.TransferId).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<StockTransferItem>(e => { e.ToTable("stock_transfer_items"); e.Property(x => x.Quantity).HasPrecision(18, 3); });
+        m.Entity<ImportedInvoice>(e =>
+        {
+            e.ToTable("imported_invoices");
+            e.HasIndex(x => new { x.TenantId, x.AccessKey }).IsUnique();
+            e.Property(x => x.AccessKey).HasMaxLength(44);
+            e.Property(x => x.Number).HasMaxLength(20);
+            e.Property(x => x.SupplierName).HasMaxLength(200);
+        });
+        m.Entity<ProductBarcode>(e =>
+        {
+            e.ToTable("product_barcodes");
+            e.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+            e.Property(x => x.Code).HasMaxLength(32);
+            e.HasOne<Product>().WithMany().HasForeignKey(x => new { x.TenantId, x.ProductId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Cascade);
+        });
+        m.Entity<ProductComponent>(e =>
+        {
+            e.ToTable("product_components");
+            e.HasIndex(x => new { x.TenantId, x.KitProductId, x.ComponentProductId }).IsUnique();
+            e.Property(x => x.Quantity).HasPrecision(18, 3);
+            e.HasOne<Product>().WithMany().HasForeignKey(x => new { x.TenantId, x.KitProductId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Product>().WithMany().HasForeignKey(x => new { x.TenantId, x.ComponentProductId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<Promotion>(e =>
+        {
+            e.ToTable("promotions");
+            e.Property(x => x.Name).HasMaxLength(80);
+            e.Property(x => x.CouponCode).HasMaxLength(30);
+            e.Property(x => x.MinQty).HasPrecision(18, 3);
+            e.Property(x => x.Percent).HasPrecision(7, 3);
+        });
+        m.Entity<Quote>(e =>
+        {
+            e.ToTable("quotes");
+            e.HasIndex(x => new { x.TenantId, x.Number }).IsUnique();
+            e.Property(x => x.CustomerName).HasMaxLength(200);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.Cascade);
+        });
+        m.Entity<QuoteItem>(e => { e.ToTable("quote_items"); e.Property(x => x.Quantity).HasPrecision(18, 3); e.Property(x => x.ProductName).HasMaxLength(200); });
+        m.Entity<TenantFiscalProfile>(e =>
+        {
+            e.ToTable("tenant_fiscal_profiles");
+            e.HasKey(x => x.TenantId);
+            e.Property(x => x.Cnpj).HasMaxLength(14);
+            e.Property(x => x.StateRegistration).HasMaxLength(20);
+            e.Property(x => x.Uf).HasMaxLength(2);
+            e.Property(x => x.Provider).HasMaxLength(20);
+            e.Property(x => x.IbsRate).HasPrecision(7, 4);
+            e.Property(x => x.CbsRate).HasPrecision(7, 4);
+        });
+        m.Entity<FiscalNumberVoid>(e => e.ToTable("fiscal_number_voids"));
+        m.Entity<NfseDocument>(e => { e.ToTable("nfse_documents"); e.HasIndex(x => x.InvoiceId).IsUnique(); });
+        m.Entity<TenantPaymentSettings>(e => { e.ToTable("tenant_payment_settings"); e.HasKey(x => x.TenantId); e.Property(x => x.MpAccountLabel).HasMaxLength(200); });
+        m.Entity<PosPixCharge>(e =>
+        {
+            e.ToTable("pos_pix_charges");
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.Property(x => x.MpPaymentId).HasMaxLength(40);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.UsedBySaleId).IsConcurrencyToken(); // uma cobrança paga uma única venda
+        });
+        m.Entity<EmailMessage>(e =>
+        {
+            e.ToTable("email_messages");
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt });
+            e.Property(x => x.To).HasMaxLength(320);
+            e.Property(x => x.Subject).HasMaxLength(300);
+            e.Property(x => x.Kind).HasMaxLength(40);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.LastError).HasMaxLength(300);
+        });
+        m.Entity<PendingSignup>(e =>
+        {
+            e.ToTable("pending_signups");
+            e.HasIndex(x => new { x.Email, x.CreatedAt });
+            e.HasIndex(x => x.TenantCode);
+            e.Property(x => x.Email).HasMaxLength(200);
+            e.Property(x => x.TenantCode).HasMaxLength(40);
+            e.Property(x => x.CodeHash).HasMaxLength(64);
+            e.Property(x => x.Ip).HasMaxLength(60);
+        });
+        m.Entity<PasswordResetToken>(e =>
+        {
+            e.ToTable("password_reset_tokens");
+            e.HasIndex(x => new { x.TenantId, x.UserId, x.CreatedAt });
+            e.Property(x => x.CodeHash).HasMaxLength(64);
+        });
+        m.Entity<PlatformSetting>(e => { e.ToTable("platform_settings"); e.HasKey(x => x.Key); e.Property(x => x.Key).HasMaxLength(100); });
         m.Entity<PaymentEvent>(e => { e.ToTable("payment_events"); e.HasIndex(x => new { x.Provider, x.ProviderEventId }).IsUnique(); });
         m.Entity<SupportSession>(e => { e.ToTable("support_sessions"); e.HasIndex(x => new { x.TenantId, x.StartedAt }); });
         m.Entity<SupportElevationRequest>(e => e.ToTable("support_elevation_requests"));
@@ -192,6 +338,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
             e.HasIndex(x => x.Action);
         });
         m.Entity<TenantBranding>(e => { e.ToTable("tenant_branding"); e.HasKey(x => x.TenantId); });
+        m.Entity<TenantStorageSettings>(e =>
+        {
+            e.ToTable("tenant_storage_settings");
+            e.HasKey(x => x.TenantId);
+            e.Property(x => x.Provider).HasMaxLength(20);
+            e.Property(x => x.DriveFolderId).HasMaxLength(200);
+            e.Property(x => x.ImpersonateUser).HasMaxLength(200);
+            e.Property(x => x.CredentialsClientEmail).HasMaxLength(320);
+            e.Property(x => x.LastTestMessage).HasMaxLength(500);
+        });
         m.Entity<BrandingVersion>(e => { e.ToTable("branding_versions"); e.HasIndex(x => new { x.TenantId, x.Version }).IsUnique(); });
         m.Entity<BrandingAsset>(e => { e.ToTable("branding_assets"); e.HasIndex(x => x.TenantId); });
 

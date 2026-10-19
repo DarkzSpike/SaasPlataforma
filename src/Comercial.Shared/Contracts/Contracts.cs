@@ -5,7 +5,7 @@ namespace Comercial.Shared.Contracts;
 // Contratos compartilhados entre API, cliente Windows e testes.
 // Note que NENHUM contrato da API de loja aceita TenantId: o servidor o deriva do token.
 
-public sealed record LoginRequest(string TenantCode, string Email, string Password, Guid? DeviceId);
+public sealed record LoginRequest(string TenantCode, string Email, string Password, Guid? DeviceId, string? TotpCode = null);
 public sealed record TokenResponse(string AccessToken, string RefreshToken, int ExpiresInSeconds);
 public sealed record RefreshRequest(string RefreshToken);
 
@@ -23,7 +23,11 @@ public sealed record CreateSaleRequest(
     Guid? DeviceId = null,
     bool CreatedOffline = false,
     Guid? CustomerId = null,
-    int RedeemPoints = 0);
+    int RedeemPoints = 0,
+    Guid? DiscountAuthorizationId = null,
+    Guid? PixChargeId = null,
+    string? CouponCode = null,
+    Guid? QuoteId = null);
 
 public sealed record SaleResponse(Guid Id, string IdempotencyKey, string Status, long SubtotalCents, long DiscountCents, long TotalCents, long ChangeCents, bool Duplicate,
     long LoyaltyDiscountCents = 0, int PointsEarned = 0);

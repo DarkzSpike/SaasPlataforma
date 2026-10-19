@@ -1,0 +1,23 @@
+<UserControl x:Class="Comercial.Desktop.Views.PromotionsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Comercial.Desktop">
+    <DockPanel>
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
+            <Button Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE710;" Content="Nova promoção" Padding="16,0" Margin="0,0,10,0" Command="{Binding NewCommand}"/>
+            <Button Style="{StaticResource DarkButton}" Content="Ativar / desativar" Padding="16,0" Command="{Binding ToggleCommand}"/>
+        </StackPanel>
+        <Border Style="{StaticResource Card}" ClipToBounds="True">
+            <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" AutomationProperties.Name="Promoções">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Nome" Binding="{Binding Name}" Width="*"/>
+                    <DataGridTextColumn Header="Tipo" Binding="{Binding Kind}" Width="230"/>
+                    <DataGridTextColumn Header="Regra" Binding="{Binding Rule}" Width="280"/>
+                    <DataGridTextColumn Header="Validade" Binding="{Binding Period}" Width="140"/>
+                    <DataGridTextColumn Header="Situação" Binding="{Binding Status}" Width="110"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </DockPanel>
+</UserControl>

@@ -44,6 +44,32 @@ public static class Permissions
     public const string UsersManage = "users.manage";
     public const string DevicesManage = "devices.manage";
     public const string SupportApprove = "support.approve";
+    /// <summary>Ver e pagar as faturas do sistema (mensalidade).</summary>
+    public const string BillingManage = "billing.manage";
+    /// <summary>Autorizar desconto no valor total da venda (por padrão só o proprietário).</summary>
+    public const string SalesDiscountAuthorize = "sales.discount.authorize";
+    /// <summary>Configurar a conta de recebimento da loja (Mercado Pago, PIX no caixa).</summary>
+    public const string PaymentsConfigure = "payments.configure";
+
+    /// <summary>Nomes em português para a tela de funcionários.</summary>
+    public static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>
+    {
+        [ProductsRead] = "Ver produtos", [ProductsWrite] = "Cadastrar e editar produtos", [StockRead] = "Ver estoque",
+        [StockEntry] = "Lançar entrada de mercadoria", [StockAdjust] = "Ajustar estoque e inventário", [SalesCreate] = "Vender (PDV)",
+        [SalesRead] = "Ver histórico de vendas", [SalesCancel] = "Cancelar vendas", [SalesDiscountHigh] = "Desconto por item acima do limite",
+        [SalesDiscountAuthorize] = "Autorizar desconto no total da venda", [SalesReturn] = "Trocas e devoluções",
+        [CashOperate] = "Abrir/fechar o próprio caixa e sangria", [CashReview] = "Ver e revisar caixas de todos",
+        [OperatingOpenClose] = "Abrir e fechar a loja", [OperatingCorrect] = "Corrigir horários da loja",
+        [FiscalEmit] = "Emitir documento fiscal", [FiscalRead] = "Ver documentos fiscais",
+        [ReportsRead] = "Ver painel e relatórios", [ReportsFinancial] = "Ver lucro e avisos financeiros", [ReportsExport] = "Exportar relatórios (CSV)",
+        [UsersManage] = "Gerenciar funcionários", [DevicesManage] = "Gerenciar terminais", [SupportApprove] = "Aprovar acesso do suporte",
+        [SyncReconcile] = "Resolver pendências de sincronização", [SuppliersManage] = "Fornecedores", [PurchasesManage] = "Pedidos de compra",
+        [PurchasesApprove] = "Aprovar pedidos de compra", [PurchasesReceive] = "Receber mercadoria de compras",
+        [CustomersRead] = "Ver clientes", [CustomersManage] = "Cadastrar clientes", [CustomersPrivacy] = "Exportar/anonimizar dados de clientes (LGPD)",
+        [LoyaltyManage] = "Configurar programa de pontos", [FinanceRead] = "Ver contas a pagar/receber", [FinanceManage] = "Lançar e baixar contas",
+        [BillingManage] = "Ver e pagar as faturas do sistema",
+        [PaymentsConfigure] = "Configurar recebimentos da loja (PIX no caixa)",
+    };
     public const string SalesReturn = "sales.return";
     /// <summary>Resolver vendas offline recusadas (reenviar com preço atual ou descartar com motivo).</summary>
     public const string SyncReconcile = "sync.reconcile";
@@ -66,7 +92,7 @@ public static class Permissions
         SalesCancel, SalesDiscountHigh, CashOperate, CashReview, OperatingOpenClose, OperatingCorrect,
         FiscalEmit, FiscalRead, ReportsRead, ReportsFinancial, UsersManage, DevicesManage, SupportApprove,
         SalesReturn, SyncReconcile, SuppliersManage, PurchasesManage, PurchasesApprove, PurchasesReceive,
-        CustomersRead, CustomersManage, CustomersPrivacy, LoyaltyManage, FinanceRead, FinanceManage, ReportsExport
+        CustomersRead, CustomersManage, CustomersPrivacy, LoyaltyManage, FinanceRead, FinanceManage, ReportsExport, BillingManage, SalesDiscountAuthorize, PaymentsConfigure
     ];
 
     private static readonly Dictionary<string, string[]> RoleMap = new()
@@ -82,8 +108,10 @@ public static class Permissions
         ],
         [Roles.Operator] = [ProductsRead, StockRead, SalesCreate, SalesRead, CashOperate, OperatingOpenClose, FiscalEmit, CustomersRead, CustomersManage],
         [Roles.Stockist] = [ProductsRead, ProductsWrite, StockRead, StockEntry, StockAdjust, SuppliersManage, PurchasesManage, PurchasesReceive],
-        [Roles.Finance] = [SalesRead, CashReview, FiscalRead, ReportsRead, ReportsFinancial, FinanceRead, FinanceManage, ReportsExport, SuppliersManage],
+        [Roles.Finance] = [SalesRead, CashReview, FiscalRead, ReportsRead, ReportsFinancial, FinanceRead, FinanceManage, ReportsExport, SuppliersManage, BillingManage],
     };
+
+    public static IReadOnlyList<string> ForRole(string role) => RoleMap.TryGetValue(role, out var p) ? p : [];
 
     public static IReadOnlySet<string> Resolve(IEnumerable<string> roles, IEnumerable<(string Permission, bool Granted)> grants)
     {

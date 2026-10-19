@@ -82,10 +82,19 @@
                 </DockPanel>
             </Border>
 
+            <!-- Aviso de nova versão (assinada pelo servidor; o SHA-256 do instalador é conferido antes de instalar) -->
+            <Border DockPanel.Dock="Top" Background="#2A1E8CFF" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="0,0,0,1" Padding="24,8"
+                    Visibility="{Binding HasUpdate, Converter={StaticResource Vis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE896;" Content="Atualizar agora" Padding="14,0" Height="36" Command="{Binding UpdateCommand}"/>
+                    <TextBlock Text="{Binding UpdateText}" Foreground="White" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,14,0"/>
+                </DockPanel>
+            </Border>
+
             <!-- Navegação lateral: só aparecem as áreas que a empresa contratou e o usuário pode ver -->
             <Border DockPanel.Dock="Left" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource DarkBorderBrush}" BorderThickness="0,0,1,0" Width="108">
                 <ScrollViewer VerticalScrollBarVisibility="Hidden">
-                    <ListBox ItemsSource="{Binding Nav}" SelectedItem="{Binding SelectedNav}" Background="Transparent" BorderThickness="0" Margin="0,12,0,12"
+                    <ListBox ItemsSource="{Binding Nav}" SelectedItem="{Binding SelectedNav}" Background="Transparent" BorderThickness="0" Margin="0,8,0,8"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Navegação">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
@@ -94,10 +103,10 @@
                                 <Setter Property="Template">
                                     <Setter.Value>
                                         <ControlTemplate TargetType="ListBoxItem">
-                                            <Border x:Name="Bd" Padding="2,8" Margin="8,2" CornerRadius="12" Background="Transparent">
+                                            <Border x:Name="Bd" Padding="2,5" Margin="8,1" CornerRadius="12" Background="Transparent">
                                                 <StackPanel HorizontalAlignment="Center">
-                                                    <TextBlock x:Name="Ic" Style="{StaticResource Glyph}" Text="{Binding Glyph}" FontSize="20" HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
-                                                    <TextBlock x:Name="Tx" Text="{Binding Title}" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock x:Name="Ic" Style="{StaticResource Glyph}" Text="{Binding Glyph}" FontSize="18" HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                                    <TextBlock x:Name="Tx" Text="{Binding Title}" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
                                                 </StackPanel>
                                             </Border>
                                             <ControlTemplate.Triggers>
@@ -205,6 +214,25 @@
             </Border>
         </Grid>
 
+        <!-- PIX no caixa: QR Code até o Mercado Pago confirmar -->
+        <Grid Background="#CC050A14" Visibility="{Binding PixPay, Converter={StaticResource Vis}}">
+            <Border Style="{StaticResource Card}" Width="560" VerticalAlignment="Center" Padding="32" DataContext="{Binding PixPay}">
+                <StackPanel>
+                    <TextBlock Text="Pagamento com PIX" FontSize="24" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding AmountText}" FontSize="34" FontWeight="Bold" Foreground="{DynamicResource PrimaryLightBrush}" HorizontalAlignment="Center" Margin="0,6,0,14"/>
+                    <Border Background="White" CornerRadius="10" Padding="10" HorizontalAlignment="Center">
+                        <Image Source="{Binding QrImage}" Width="260" Height="260" RenderOptions.BitmapScalingMode="NearestNeighbor" AutomationProperties.Name="QR Code PIX"/>
+                    </Border>
+                    <TextBlock Text="Peça para o cliente ler o QR Code no app do banco." Style="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                    <TextBlock Text="{Binding Status}" Foreground="{DynamicResource WarnBrush}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                    <UniformGrid Rows="1" Margin="0,20,0,0">
+                        <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8C8;" Content="Copiar código" Margin="0,0,6,0" Command="{Binding CopyCommand}"/>
+                        <Button Style="{StaticResource DarkButton}" Content="Cancelar PIX" Margin="6,0,0,0" Foreground="{DynamicResource DangerBrush}" Command="{Binding CancelCommand}"/>
+                    </UniformGrid>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- Diálogo sobreposto -->
         <Grid Background="#B3050A14" Visibility="{Binding Prompt, Converter={StaticResource Vis}}">
             <Border Style="{StaticResource Card}" Width="480" VerticalAlignment="Center" Padding="28" DataContext="{Binding Prompt}">
@@ -218,6 +246,14 @@
                     <StackPanel Visibility="{Binding HasText, Converter={StaticResource Vis}}" Margin="0,14,0,0">
                         <TextBlock Text="{Binding TextLabel}" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8"/>
                         <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE70F;" Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding HasUser, Converter={StaticResource Vis}}" Margin="0,14,0,0">
+                        <TextBlock Text="{Binding UserLabel}" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8"/>
+                        <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE77B;" Text="{Binding User, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="E-mail de quem autoriza"/>
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding HasPassword, Converter={StaticResource Vis}}" Margin="0,14,0,0">
+                        <TextBlock Text="{Binding PasswordLabel}" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8"/>
+                        <PasswordBox Style="{StaticResource DarkPassword}" PasswordChanged="PromptPassword_Changed" DataContextChanged="PromptPassword_ContextChanged" AutomationProperties.Name="Senha de quem autoriza"/>
                     </StackPanel>
                     <TextBlock Text="{Binding Error}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="{Binding Error, Converter={StaticResource Vis}}"/>
                     <UniformGrid Rows="1" Margin="0,22,0,0">

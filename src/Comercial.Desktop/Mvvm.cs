@@ -16,7 +16,7 @@ public abstract class ObservableObject : INotifyPropertyChanged
         return true;
     }
 
-    protected void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    protected void Raise([System.Runtime.CompilerServices.CallerMemberName] string name = "") => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 public sealed class RelayCommand(Func<object?, Task> run, Func<object?, bool>? can = null) : ICommand

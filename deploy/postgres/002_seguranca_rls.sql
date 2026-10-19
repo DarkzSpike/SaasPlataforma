@@ -25,7 +25,7 @@ GRANT USAGE ON SCHEMA public TO app_comercial;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO app_comercial;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_comercial;
 -- DELETE só onde a aplicação realmente remove linhas (vínculos de papéis/permissões).
-GRANT DELETE ON user_roles, user_permissions, push_tokens TO app_comercial;
+GRANT DELETE ON user_roles, user_permissions, push_tokens, product_barcodes, product_components, quote_items TO app_comercial;
 
 CREATE OR REPLACE FUNCTION app_tenant_ok(t uuid) RETURNS boolean
 LANGUAGE sql STABLE AS $$
@@ -44,7 +44,7 @@ BEGIN
     'stock_balances','sales','sale_items','payments','cash_sessions','cash_movements','store_hours',
     'operating_events','fiscal_documents','fiscal_events','sync_events','support_sessions','support_elevation_requests',
     'notifications','push_tokens','suppliers','purchase_orders','purchase_items','purchase_receipts',
-    'customers','loyalty_programs','loyalty_transactions','financial_titles','sale_returns','sale_return_items']
+    'customers','loyalty_programs','loyalty_transactions','financial_titles','sale_returns','sale_return_items','tenant_storage_settings','discount_authorizations','password_reset_tokens','tenant_payment_settings','pos_pix_charges','tenant_fiscal_profiles','fiscal_number_voids','product_barcodes','product_components','promotions','quotes','quote_items','product_batches','stock_transfers','stock_transfer_items','imported_invoices']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);

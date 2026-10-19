@@ -10,8 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Comercial.Api.Endpoints;
 
-public sealed record ProductInput(string Sku, string? Barcode, string Name, string? Description, string Unit, long PriceCents, long CostCents, decimal MinStock, Guid? CategoryId, int? ExpectedVersion);
-public sealed record StockEntryRequest(Guid StoreId, Guid ProductId, decimal Quantity, long UnitCostCents, string? Reason);
+public sealed record ProductInput(string Sku, string? Barcode, string Name, string? Description, string Unit, long PriceCents, long CostCents, decimal MinStock, Guid? CategoryId, int? ExpectedVersion,
+    string? Ncm = null, string? Cest = null, string? Cfop = null, int FiscalOrigin = 0, string? IcmsCst = null, string? IbsCbsCst = null, string? IbsCbsClass = null);
+public sealed record StockEntryRequest(Guid StoreId, Guid ProductId, decimal Quantity, long UnitCostCents, string? Reason, string? BatchCode = null, DateOnly? ExpiresOn = null);
 public sealed record StockAdjustRequest(Guid StoreId, Guid ProductId, decimal Quantity, string Reason);
 public sealed record InventoryCount(Guid ProductId, decimal CountedQuantity);
 public sealed record InventoryRequest(Guid StoreId, string Reason, List<InventoryCount> Counts);
@@ -25,6 +26,14 @@ public static class TenantEndpoints
         var auth = app.MapGroup("/api/v1/auth").RequireRateLimiting("auth");
         auth.MapPost("/login", async (LoginRequest r, AuthService s) => Results.Ok(await s.LoginAsync(r)));
         auth.MapPost("/refresh", async (RefreshRequest r, AuthService s) => Results.Ok(await s.RefreshAsync(r.RefreshToken)));
+        // "Esqueci minha senha": resposta sempre igual (não revela se o e-mail existe).
+        // Cadastro com teste grátis (público, com limite por IP).
+        var pub = app.MapGroup("/api/v1/public").RequireRateLimiting("auth");
+        pub.MapGet("/desktop/latest", async (DesktopReleaseService s) => await s.LatestAsync() is { } r ? Results.Ok(r) : Results.NoContent());
+        pub.MapPost("/signup", async (SignupRequest r, SignupService s) => Results.Ok(await s.StartAsync(r)));
+        pub.MapPost("/signup/verify", async (SignupVerifyRequest r, SignupService s) => Results.Ok(await s.VerifyAsync(r)));
+        auth.MapPost("/forgot", async (ForgotPasswordRequest r, PasswordResetService s) => { await s.RequestAsync(r); return Results.Accepted(); });
+        auth.MapPost("/reset", async (ResetPasswordWithCodeRequest r, PasswordResetService s) => { await s.ResetAsync(r); return Results.NoContent(); });
 
         // Todas as rotas abaixo exigem ator de loja (ou suporte com sessão válida).
         var api = app.MapGroup("/api/v1").AddEndpointFilter(async (ctx, next) =>
@@ -34,6 +43,10 @@ public static class TenantEndpoints
         });
 
         api.MapPost("/auth/logout", async (AuthService s) => { await s.LogoutAsync(); return Results.NoContent(); });
+        api.MapGet("/me/2fa", async (UserTwoFactorService s) => Results.Ok(await s.StatusAsync())).RequireFeature(ModuleKeys.Core, null);
+        api.MapPost("/me/2fa/setup", async (UserTwoFactorService s) => Results.Ok(await s.SetupAsync())).RequireFeature(ModuleKeys.Core, null);
+        api.MapPost("/me/2fa/enable", async (TotpCodeRequest r, UserTwoFactorService s) => { await s.EnableAsync(r); return Results.NoContent(); }).RequireFeature(ModuleKeys.Core, null);
+        api.MapPost("/me/2fa/disable", async (TotpCodeRequest r, UserTwoFactorService s) => { await s.DisableAsync(r); return Results.NoContent(); }).RequireFeature(ModuleKeys.Core, null);
 
         api.MapGet("/me", async (RequestActor a, FeatureAuthorization f, AppDbContext db) =>
         {
@@ -138,11 +151,13 @@ public static class TenantEndpoints
                               where p.IsActive
                               join b in db.StockBalances.AsNoTracking().Where(b => b.StoreId == storeId) on p.Id equals b.ProductId into bs
                               from b in bs.DefaultIfEmpty()
-                              select new { ProductId = p.Id, p.Name, p.Sku, p.Barcode, p.PriceCents, p.CostCents, Quantity = b == null ? 0m : b.Quantity, p.MinStock, HasImage = p.ImageKey != null })
+                              select new { ProductId = p.Id, p.Name, p.Sku, p.Barcode, p.PriceCents, p.CostCents, Quantity = b == null ? 0m : b.Quantity, p.MinStock, HasImage = p.ImageKey != null,
+                                  p.Unit, p.Ncm, p.Cest, p.Cfop, p.FiscalOrigin, p.IcmsCst, p.IbsCbsCst, p.IbsCbsClass })
                              .ToListAsync();
             return Results.Ok(rows.OrderBy(r => r.Name).Select(r => new
             {
                 r.ProductId, r.Name, r.Sku, r.Barcode, r.PriceCents, r.CostCents, r.Quantity, r.MinStock, r.HasImage, low = r.Quantity <= r.MinStock,
+                r.Unit, r.Ncm, r.Cest, r.Cfop, r.FiscalOrigin, r.IcmsCst, r.IbsCbsCst, r.IbsCbsClass,
             }));
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
 
@@ -179,14 +194,20 @@ public static class TenantEndpoints
         stock.MapGet("/movements", async (AppDbContext db, Guid productId) =>
             Results.Ok(await db.StockMovements.AsNoTracking().Where(m => m.ProductId == productId).OrderByDescending(m => m.CreatedAt).Take(500).ToListAsync()))
             .RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
-        stock.MapPost("/entries", async (StockEntryRequest r, AppDbContext db, StockService s, ScopedLookup l, AuditService audit, RequestActor a) =>
+        stock.MapPost("/entries", async (StockEntryRequest r, AppDbContext db, StockService s, ScopedLookup l, AuditService audit, RequestActor a, BatchService batches) =>
         {
             if (r.Quantity <= 0 || r.Quantity > 1_000_000 || r.UnitCostCents < 0) throw new DomainException("invalid_quantity", "Quantidade ou custo inválido.");
+            if (r.BatchCode is { Length: > 40 }) throw new DomainException("invalid_batch", "Código do lote muito longo.");
             await s.EnsureStoreAccessAsync(r.StoreId);
             await l.GetAsync<Product>(r.ProductId);
             await using var tx = await db.Database.BeginTransactionAsync();
             audit.Add("stock.entry", a.TenantId, nameof(Product), r.ProductId, r);
             await s.MoveAsync(r.StoreId, r.ProductId, r.Quantity, StockMovementType.Entry, r.Reason, null, r.UnitCostCents);
+            if (!string.IsNullOrWhiteSpace(r.BatchCode) || r.ExpiresOn is not null)
+            {
+                batches.Add(r.ProductId, r.StoreId, string.IsNullOrWhiteSpace(r.BatchCode) ? "S/L" : r.BatchCode.Trim(), r.ExpiresOn, r.Quantity);
+                await db.SaveChangesAsync();
+            }
             await tx.CommitAsync();
             return Results.NoContent();
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockEntry, write: true);
@@ -230,6 +251,9 @@ public static class TenantEndpoints
 
         // ---------- Vendas ----------
         var sales = api.MapGroup("/sales");
+        // Desconto no total: o proprietário digita a senha dele no PDV do operador (limite de tentativas como no login).
+        sales.MapPost("/discount-authorizations", async (DiscountAuthorizationRequest r, DiscountAuthorizationService s) => Results.Ok(await s.AuthorizeAsync(r)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate, write: true).RequireRateLimiting("auth");
         sales.MapPost("/", async (CreateSaleRequest r, SalesService s) =>
         {
             var res = await s.CreateAsync(r);
@@ -278,8 +302,9 @@ public static class TenantEndpoints
         }).RequireFeature(ModuleKeys.StoreHours, Permissions.OperatingOpenClose, write: true);
         op.MapPost("/events/{id:guid}/correct", async (Guid id, OperatingCorrectionRequest r, OperatingService s) => Results.Ok(await s.CorrectAsync(id, r)))
             .RequireFeature(ModuleKeys.StoreHours, Permissions.OperatingCorrect, write: true);
+        // Quem abre/fecha a loja (inclusive o operador) precisa saber se ela está aberta.
         op.MapGet("/status", async (Guid storeId, OperatingService s) => Results.Ok(await s.StatusAsync(storeId)))
-            .RequireFeature(ModuleKeys.StoreHours, Permissions.ReportsRead);
+            .RequireFeature(ModuleKeys.StoreHours, Permissions.OperatingOpenClose);
         op.MapGet("/events", async (Guid storeId, AppDbContext db) =>
             Results.Ok(await db.OperatingEvents.AsNoTracking().Where(e => e.StoreId == storeId).OrderByDescending(e => e.ReceivedAt).Take(500).ToListAsync()))
             .RequireFeature(ModuleKeys.StoreHours, Permissions.ReportsRead);
@@ -289,6 +314,15 @@ public static class TenantEndpoints
             .RequireFeature(ModuleKeys.Fiscal, Permissions.FiscalRead);
         api.MapPost("/fiscal/documents/{id:guid}/transmit", async (Guid id, FiscalService s, CancellationToken ct) => Results.Ok(await s.TransmitAsync(id, ct)))
             .RequireFeature(ModuleKeys.Fiscal, Permissions.FiscalEmit, write: true);
+        api.MapPost("/fiscal/documents/{id:guid}/cancel", async (Guid id, CancelFiscalRequest r, FiscalService s, CancellationToken ct) => Results.Ok(await s.CancelAsync(id, r, ct)))
+            .RequireFeature(ModuleKeys.Fiscal, Permissions.FiscalEmit);
+        api.MapPost("/fiscal/void-numbers", async (VoidNumbersRequest r, FiscalService s, CancellationToken ct) => Results.Ok(await s.VoidNumbersAsync(r, ct)))
+            .RequireFeature(ModuleKeys.Fiscal, Permissions.FiscalEmit);
+        api.MapGet("/fiscal/profile", async (FiscalService s) => Results.Ok(await s.GetProfileAsync()))
+            .RequireFeature(ModuleKeys.Fiscal, Permissions.FiscalRead);
+        // Dados do emitente e credencial do provedor: só o dono.
+        api.MapPut("/fiscal/profile", async (FiscalProfileRequest r, FiscalService s) => Results.Ok(await s.SaveProfileAsync(r)))
+            .RequireFeature(ModuleKeys.Fiscal, Permissions.PaymentsConfigure);
 
         // ---------- Relatórios ----------
         api.MapGet("/reports/sales-summary", async (AppDbContext db, RequestActor a, DateTimeOffset from, DateTimeOffset to, Guid? storeId) =>
@@ -431,8 +465,21 @@ public static class TenantEndpoints
 
         // ---------- Usuários e dispositivos ----------
         var users = api.MapGroup("/users");
+        users.MapGet("/permission-catalog", (RequestActor a) => Results.Ok(new
+        {
+            roles = Roles.All.Where(r => Roles.Level(r) <= a.MaxRoleLevel && (r != Roles.Owner || a.Roles.Contains(Roles.Owner)))
+                .Select(r => new { key = r, permissions = Permissions.ForRole(r) }),
+            permissions = Permissions.All.Select(p => new { key = p, name = Permissions.Labels.GetValueOrDefault(p, p), canGrant = a.Permissions.Contains(p) }),
+        })).RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
+        users.MapGet("/grants", async (AppDbContext db) =>
+            Results.Ok(await db.UserPermissionGrants.AsNoTracking().Select(g => new { g.UserId, g.Permission, g.Granted }).ToListAsync()))
+            .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
+        users.MapPost("/{id:guid}/2fa/reset", async (Guid id, UserTwoFactorService s, UserService us) => { await s.ResetForUserAsync(id, us); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
+        users.MapPost("/{id:guid}/password", async (Guid id, ResetPasswordRequest r, UserService s) => { await s.ResetPasswordAsync(id, r); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapGet("/", async (AppDbContext db) => Results.Ok(await db.Users.AsNoTracking().Include(u => u.Roles)
-                .Select(u => new { u.Id, u.Email, u.DisplayName, u.IsActive, u.StoreId, u.LastLoginAt, roles = u.Roles.Select(r => r.Role) }).ToListAsync()))
+                .Select(u => new { u.Id, u.Email, u.DisplayName, u.IsActive, u.StoreId, u.LastLoginAt, u.CommissionPercent, roles = u.Roles.Select(r => r.Role) }).ToListAsync()))
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapPost("/", async (CreateUserRequest r, UserService s) => { var u = await s.CreateAsync(r); return Results.Created($"/api/v1/users/{u.Id}", new { u.Id, u.Email }); })
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage, write: true);
@@ -511,6 +558,37 @@ public static class TenantEndpoints
             .RequireFeature(ModuleKeys.Core, Permissions.SupportApprove);
         api.MapPost("/support/sessions/{id:guid}/revoke", async (Guid id, SupportService s) => { await s.EndAsync(id, "revogada pela empresa", byTenant: true); return Results.NoContent(); })
             .RequireFeature(ModuleKeys.Core, Permissions.SupportApprove);
+        api.MapGet("/support/preauthorization", async (AppDbContext db, RequestActor a) =>
+            Results.Ok(SupportService.GetPreAuthorization(await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == a.TenantId))))
+            .RequireFeature(ModuleKeys.Core, Permissions.SupportApprove);
+        api.MapPut("/support/preauthorization", async (SupportPreAuthorizationRequest r, SupportService s) => Results.Ok(await s.SetPreAuthorizationAsync(r)))
+            .RequireFeature(ModuleKeys.Core, Permissions.SupportApprove);
+
+        // ---------- Recebimentos da loja: PIX dinâmico no caixa (Mercado Pago da própria loja) ----------
+        api.MapGet("/payments/settings", async (StorePixService s) => Results.Ok(await s.GetAsync()))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+        api.MapPut("/payments/settings", async (StorePaymentSettingsRequest r, StorePixService s, CancellationToken ct) => Results.Ok(await s.SaveAsync(r, ct)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.PaymentsConfigure);
+        var pix = api.MapGroup("/pos/pix-charges");
+        pix.MapPost("/", async (CreatePixChargeRequest r, StorePixService s, CancellationToken ct) => Results.Ok(await s.CreateAsync(r, ct)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate, write: true);
+        pix.MapGet("/{id:guid}", async (Guid id, StorePixService s, CancellationToken ct) => Results.Ok(await s.StatusAsync(id, ct)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+        pix.MapPost("/{id:guid}/cancel", async (Guid id, StorePixService s, CancellationToken ct) => { await s.CancelAsync(id, ct); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+
+        // ---------- Faturas do sistema (Mercado Pago) ----------
+        // Leitura e pagamento continuam liberados com licença restrita: é assim que o cliente regulariza.
+        var billing = api.MapGroup("/billing");
+        billing.MapGet("/invoices", async (AppDbContext db, BillingService b) =>
+            Results.Ok((await db.Invoices.AsNoTracking().OrderByDescending(i => i.DueAt).Take(60).ToListAsync()).Select(b.View)))
+            .RequireFeature(ModuleKeys.Core, Permissions.BillingManage);
+        billing.MapPost("/invoices/{id:guid}/pix", async (Guid id, BillingService b, CancellationToken ct) => Results.Ok(await b.PixAsync(id, ct)))
+            .RequireFeature(ModuleKeys.Core, Permissions.BillingManage);
+        billing.MapPost("/invoices/{id:guid}/checkout", async (Guid id, BillingService b, CancellationToken ct) => Results.Ok(await b.CheckoutAsync(id, ct)))
+            .RequireFeature(ModuleKeys.Core, Permissions.BillingManage);
+        billing.MapPost("/invoices/{id:guid}/refresh", async (Guid id, BillingService b, CancellationToken ct) => Results.Ok(await b.RefreshAsync(id, ct)))
+            .RequireFeature(ModuleKeys.Core, Permissions.BillingManage);
     }
 
     private static void Validate(ProductInput r)
@@ -521,11 +599,15 @@ public static class TenantEndpoints
         if (r.PriceCents < 0 || r.PriceCents > 100_000_000 || r.CostCents < 0 || r.CostCents > 100_000_000) throw new DomainException("invalid_price", "Preço ou custo inválido.");
         if (r.Unit is not ("UN" or "KG" or "G" or "L" or "ML" or "M" or "CX" or "PC")) throw new DomainException("invalid_unit", "Unidade inválida.");
         if (r.MinStock < 0) throw new DomainException("invalid_min_stock", "Estoque mínimo inválido.");
+        if (FiscalRules.ValidateProduct(r.Ncm, r.Cest, r.Cfop, r.FiscalOrigin, r.IcmsCst, r.IbsCbsCst, r.IbsCbsClass) is { } fe) throw new DomainException("invalid_fiscal", fe);
     }
 
     private static void Apply(Product p, ProductInput r)
     {
         p.Sku = r.Sku.Trim(); p.Barcode = r.Barcode?.Trim(); p.Name = r.Name.Trim(); p.Description = r.Description;
         p.Unit = r.Unit; p.PriceCents = r.PriceCents; p.CostCents = r.CostCents; p.MinStock = r.MinStock; p.CategoryId = r.CategoryId;
+        static string? D(string? s) => string.IsNullOrWhiteSpace(s) ? null : FiscalRules.Digits(s);
+        p.Ncm = D(r.Ncm); p.Cest = D(r.Cest); p.Cfop = D(r.Cfop); p.FiscalOrigin = r.FiscalOrigin; p.IcmsCst = D(r.IcmsCst);
+        p.IbsCbsCst = D(r.IbsCbsCst); p.IbsCbsClass = D(r.IbsCbsClass);
     }
 }

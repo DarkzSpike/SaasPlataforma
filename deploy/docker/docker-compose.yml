@@ -1,0 +1,92 @@
+# Produção num servidor Linux (VPS) com Docker. Passo a passo em docs/DEPLOY.md.
+#   cd deploy/docker && ./gerar-segredos.sh && nano .env && docker compose up -d --build
+name: comercial
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: comercial
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d comercial"]
+      interval: 5s
+      retries: 20
+    # Sem "ports": o banco NÃO fica exposto na internet.
+
+  # Aplica os scripts idempotentes do banco (estrutura + segurança por empresa/RLS) a cada subida.
+  migrate:
+    image: postgres:18
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: comercial
+      PGOPTIONS: "-c client_min_messages=warning"
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    volumes:
+      - ../postgres:/sql:ro
+    entrypoint: ["sh", "-c", "psql -v ON_ERROR_STOP=1 -q -f /sql/001_inicial.sql && psql -v ON_ERROR_STOP=1 -q -f /sql/002_seguranca_rls.sql && psql -q -c \"ALTER ROLE app_comercial PASSWORD '$$APP_DB_PASSWORD'\""]
+    restart: "no"
+
+  api:
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile.api }
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Provider: Postgres
+      Database__ApplyMigrationsOnStartup: "false"
+      ConnectionStrings__Main: "Host=db;Database=comercial;Username=app_comercial;Password=${APP_DB_PASSWORD}"
+      Jwt__TenantSigningKey: ${JWT_TENANT_KEY}
+      Jwt__AdminSigningKey: ${JWT_ADMIN_KEY}
+      License__PrivateKeyPemFile: /run/secrets/license_key
+      Bootstrap__AdminEmail: ${ADMIN_EMAIL}
+      Bootstrap__AdminPassword: ${ADMIN_PASSWORD}
+      Bootstrap__AdminTotpSecret: ${ADMIN_TOTP_SECRET}
+      DataProtection__KeysPath: /data/keys
+      Storage__Root: /data/storage
+      Cors__AdminOrigins__0: https://${ADMIN_DOMAIN}
+      Payments__generic__WebhookSecret: ${WEBHOOK_SECRET}
+      Proxy__Enabled: "true"
+      Proxy__KnownNetworks__0: 172.16.0.0/12
+    volumes:
+      - apidata:/data
+    secrets:
+      - license_key
+
+  admin:
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile.admin }
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ApiBaseUrl: https://${API_DOMAIN}
+      Proxy__Enabled: "true"
+      Proxy__KnownNetworks__0: 172.16.0.0/12
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [api, admin]
+
+secrets:
+  license_key:
+    file: ./secrets/license_key.pem
+
+volumes:
+  pgdata:
+  apidata:
+  caddy_data:

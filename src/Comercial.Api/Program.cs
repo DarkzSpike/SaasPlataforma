@@ -24,7 +24,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<KeyMaterial>();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<TokenService>();
-builder.Services.AddSingleton<IFiscalProvider, NotConfiguredFiscalProvider>();
+builder.Services.AddHttpClient<FocusNfeProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
+builder.Services.AddScoped<IFiscalProvider>(sp => sp.GetRequiredService<FocusNfeProvider>());
+builder.Services.AddHttpClient<INfseProvider, FocusNfseProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddScoped<RequestActor>();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<LicenseService>();
@@ -51,6 +53,36 @@ builder.Services.AddScoped<LoyaltyService>();
 builder.Services.AddScoped<FinanceService>();
 builder.Services.AddScoped<ReturnService>();
 builder.Services.AddScoped<ProductImageService>();
+builder.Services.AddScoped<TenantStorageService>();
+builder.Services.AddScoped<PlatformSettingsService>();
+builder.Services.AddScoped<BillingService>();
+builder.Services.AddScoped<DiscountAuthorizationService>();
+builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<EmailSender>();
+builder.Services.AddScoped<PasswordResetService>();
+builder.Services.AddScoped<StorePixService>();
+builder.Services.AddScoped<NfseService>();
+builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<PromotionService>();
+builder.Services.AddScoped<QuoteService>();
+builder.Services.AddScoped<CreditService>();
+builder.Services.AddScoped<NfeImportService>();
+builder.Services.AddScoped<ProductCsvImportService>();
+builder.Services.AddScoped<BatchService>();
+builder.Services.AddScoped<TransferService>();
+builder.Services.AddScoped<ReportService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<SignupService>();
+builder.Services.AddScoped<DesktopReleaseService>();
+builder.Services.AddScoped<UserTwoFactorService>();
+builder.Services.AddHostedService<ExpiryJob>();
+builder.Services.AddHostedService<FiscalJob>();
+builder.Services.AddHostedService<NfseJob>();
+builder.Services.AddSingleton<IEmailTransport, SmtpEmailTransport>();
+builder.Services.AddHostedService<EmailJob>();
+builder.Services.AddHttpClient<IMercadoPagoClient, MercadoPagoClient>(c => { c.BaseAddress = new Uri("https://api.mercadopago.com"); c.Timeout = TimeSpan.FromSeconds(20); });
+builder.Services.AddHostedService<BillingJob>();
+builder.Services.AddSingleton<IDriveGateway, GoogleDriveGateway>();
 builder.Services.AddSingleton<IProductImageStore, LocalProductImageStore>();
 if (config["ProductImages:Provider"] == "GoogleDrive")
     builder.Services.AddSingleton<IProductImageStore, GoogleDriveProductImageStore>();
@@ -88,6 +120,8 @@ builder.Services.AddRateLimiter(o =>
     var perMinute = config.GetValue("RateLimit:AuthPerMinute", 10);
     o.AddPolicy("auth", ctx => RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = perMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    o.AddPolicy("webhook", ctx => RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = config.GetValue("RateLimit:WebhookPerMinute", 120), Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx => RateLimitPartition.GetFixedWindowLimiter(
         ctx.Request.Headers.Authorization.ToString() is { Length: > 20 } a ? a[^20..] : ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = config.GetValue("RateLimit:GlobalPerMinute", 600), Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -102,6 +136,19 @@ builder.Services.AddProblemDetails();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.MaxDepth = 32);
 
 var app = builder.Build();
+
+// Atrás do proxy HTTPS (Caddy/Nginx): IP real do cliente (limites por IP) e esquema https. Só confia nas redes informadas.
+if (config.GetValue("Proxy:Enabled", false))
+{
+    var fo = new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions
+    {
+        ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+        ForwardLimit = 1,
+    };
+    fo.KnownIPNetworks.Clear(); fo.KnownProxies.Clear();
+    foreach (var n in config.GetSection("Proxy:KnownNetworks").Get<string[]>() ?? []) fo.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(n));
+    app.UseForwardedHeaders(fo);
+}
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.Use(async (ctx, next) =>
@@ -127,6 +174,25 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapTenantApi();
 app.MapBusinessApi();
 app.MapAdminApi();
+// Mercado Pago: valida x-signature e confirma o pagamento consultando a API do Mercado Pago (nunca confia só no aviso).
+app.MapPost("/webhooks/mercadopago", async (HttpRequest req, BillingService s, TenantContext tenant, CancellationToken ct) =>
+{
+    tenant.SetPlatformScope();
+    string? dataId = req.Query["data.id"], type = req.Query["type"];
+    if (string.IsNullOrEmpty(dataId))
+    {
+        try
+        {
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
+            dataId = doc.RootElement.TryGetProperty("data", out var d) && d.TryGetProperty("id", out var id) ? id.ToString() : null;
+            type ??= doc.RootElement.TryGetProperty("type", out var tp) ? tp.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException) { }
+    }
+    var (status, result) = await s.HandleWebhookAsync(type, dataId, req.Headers["x-signature"], req.Headers["x-request-id"], ct);
+    return Results.Json(new { result }, statusCode: status);
+}).RequireRateLimiting("webhook");
+
 app.MapPost("/webhooks/payments/{provider}", async (string provider, HttpRequest req, PaymentWebhookService s, TenantContext tenant) =>
 {
     tenant.SetPlatformScope(); // webhook autenticado por assinatura HMAC; localiza a fatura de qualquer empresa

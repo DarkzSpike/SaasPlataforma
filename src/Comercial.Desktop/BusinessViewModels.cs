@@ -272,6 +272,40 @@ public sealed class CustomersViewModel : OwnerPage
     public string DetailTitle { get => _detailTitle; set => Set(ref _detailTitle, value); }
     public string DetailInfo { get => _detailInfo; set => Set(ref _detailInfo, value); }
     public string PointsText { get => _points; set => Set(ref _points, value); }
+    private string _credit = "";
+    public string CreditText { get => _credit; set => Set(ref _credit, value); }
+    public RelayCommand LimitCommand => RelayCommand.Sync(_ => Shell.ShowPrompt(new PromptViewModel
+    {
+        Title = "Limite do fiado: " + Selected!.Name, Message = "Valor máximo que o cliente pode dever. 0 = não pode comprar fiado.", ValueLabel = "Limite (R$)", ConfirmText = "Salvar limite",
+    }, async p =>
+    {
+        if (!PromptViewModel.TryMoney(p.Value, out var cents)) { p.Error = "Valor inválido."; return false; }
+        try { await S.Api.PutAsync($"/api/v1/customers/{Selected!.Id}/credit-limit", new { limitCents = cents }); await LoadDetailAsync(Selected!); return true; }
+        catch (ApiException ex) { p.Error = ex.Status == 403 ? "Só o dono/financeiro define o limite." : "Falha: " + ex.Code; }
+        catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
+        return false;
+    }), _ => Selected is not null && S.Session.Can("finance.manage", "contas"));
+    private static readonly string[] ReceiveMethods = ["Dinheiro", "Cartão de débito", "Cartão de crédito", "PIX"];
+    public RelayCommand ReceiveCreditCommand => RelayCommand.Sync(_ =>
+    {
+        var f = new FormViewModel { Title = "Receber fiado: " + Selected!.Name, Message = "Baixa as contas mais antigas primeiro. Em dinheiro, o valor entra no seu caixa aberto.", ConfirmText = "Receber" };
+        f.Fields.Add(new FormField("amount", "Valor recebido (R$)", "", Icons.Money));
+        f.Fields.Add(new FormField("method", "Forma", ReceiveMethods[0], options: ReceiveMethods));
+        Shell.ShowForm(f, async form =>
+        {
+            if (!PromptViewModel.TryMoney(form["amount"], out var cents) || cents <= 0) { form.Error = "Valor inválido."; return false; }
+            try
+            {
+                await S.Api.PostAsync($"/api/v1/customers/{Selected!.Id}/credit/receive", new { amountCents = cents, method = Array.IndexOf(ReceiveMethods, form["method"]) + 1 });
+                await LoadDetailAsync(Selected!);
+                if (form["method"] == ReceiveMethods[0]) ReceiptPrinter.OpenDrawer();
+                return true;
+            }
+            catch (ApiException ex) { form.Error = ex.Code switch { "overpayment" => "Valor maior que a dívida.", "no_open_cash" => "Abra o caixa para receber em dinheiro.", _ => "Falha: " + ex.Code }; }
+            catch (HttpRequestException) { form.Error = "Sem conexão com o servidor."; }
+            return false;
+        });
+    }, _ => Selected is not null && S.Session.Can("cash.operate", "contas"));
     public bool HasSelection => Selected is not null;
     public CustomerRow? Selected { get => _selected; set { if (Set(ref _selected, value)) { Raise(nameof(HasSelection)); if (value is not null) _ = LoadDetailAsync(value); } } }
     public RelayCommand SearchCommand { get; }
@@ -305,6 +339,19 @@ public sealed class CustomersViewModel : OwnerPage
                     AppServices.Money(s.GetProperty("totalCents").GetInt64()), s.GetProperty("status").GetString() == "Cancelled" ? "Cancelada" : "Concluída", false, false));
             Statement.Clear();
             PointsText = "";
+            CreditText = "";
+            if (S.Session.Can("customers.read", "contas"))
+            {
+                try
+                {
+                    var cr = await S.Api.GetAsync($"/api/v1/customers/{c.Id}/credit");
+                    var limit = cr.GetProperty("limitCents").GetInt64();
+                    CreditText = limit > 0 || cr.GetProperty("openCents").GetInt64() > 0
+                        ? $"Fiado: deve {AppServices.Money(cr.GetProperty("openCents").GetInt64())} • limite {AppServices.Money(limit)} • disponível {AppServices.Money(cr.GetProperty("availableCents").GetInt64())}"
+                        : "Fiado: sem limite (não pode comprar fiado)";
+                }
+                catch (ApiException) { }
+            }
             if (d.GetProperty("loyalty") is { ValueKind: JsonValueKind.Object } bal)
             {
                 PointsText = $"{bal.GetProperty("available").GetInt32()} ponto(s) disponíveis";
@@ -677,7 +724,7 @@ public sealed class AlertsViewModel(ShellViewModel shell) : OwnerPage(shell, "Av
         foreach (var n in (await S.Api.GetAsync("/api/v1/notifications")).EnumerateArray())
             Items.Add(new AlertRow(n.GetProperty("id").GetGuid(), n.GetProperty("title").GetString()!, n.GetProperty("body").GetString()!,
                 n.GetProperty("createdAt").GetDateTimeOffset().LocalDateTime.ToString("dd/MM/yyyy HH:mm"), n.GetProperty("readAt").ValueKind == JsonValueKind.Null,
-                n.GetProperty("type").GetString() == "cash.shortage" ? Icons.Money : Icons.Box));
+                n.GetProperty("type").GetString() is "cash.shortage" or "cash.withdrawal" ? Icons.Money : Icons.Box));
         Raise(nameof(IsEmpty));
     }
 }

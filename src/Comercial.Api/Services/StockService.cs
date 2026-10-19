@@ -12,8 +12,32 @@ public sealed class StockService(AppDbContext db, RequestActor actor)
     /// (UPDATE ... SET qty = qty + delta), evitando perda de atualização concorrente.
     /// Deve ser chamado dentro de uma transação aberta pelo chamador.
     /// </summary>
+    /// <summary>Movimenta o produto ou, se for kit, cada componente na proporção (venda, cancelamento, devolução).</summary>
+    public async Task MoveExpandedAsync(Guid storeId, Guid productId, decimal delta, StockMovementType type, string? reason, Guid? referenceId, long unitCostCents)
+    {
+        var comps = await db.ProductComponents.AsNoTracking().Where(c => c.KitProductId == productId).ToListAsync();
+        if (comps.Count == 0) { await MoveAsync(storeId, productId, delta, type, reason, referenceId, unitCostCents); return; }
+        var ids = comps.Select(c => c.ComponentProductId).ToList();
+        var costs = await db.Products.AsNoTracking().Where(p => ids.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.CostCents);
+        foreach (var c in comps)
+            await MoveAsync(storeId, c.ComponentProductId, delta * c.Quantity, type, reason is null ? "kit" : reason + " (kit)", referenceId, costs.GetValueOrDefault(c.ComponentProductId));
+    }
+
     public async Task MoveAsync(Guid storeId, Guid productId, decimal delta, StockMovementType type, string? reason, Guid? referenceId, long unitCostCents)
     {
+        // Lotes com validade: a venda consome primeiro o que vence antes (FEFO).
+        if (type == StockMovementType.Sale && delta < 0)
+        {
+            var left = -delta;
+            foreach (var b in await db.ProductBatches.Where(b => b.StoreId == storeId && b.ProductId == productId && b.QuantityRemaining > 0)
+                         .OrderBy(b => b.ExpiresOn == null).ThenBy(b => b.ExpiresOn).ThenBy(b => b.CreatedAt).ToListAsync())
+            {
+                if (left <= 0) break;
+                var take = Math.Min(left, b.QuantityRemaining);
+                b.QuantityRemaining -= take;
+                left -= take;
+            }
+        }
         db.StockMovements.Add(new StockMovement
         {
             StoreId = storeId, ProductId = productId, Quantity = delta, Type = type, Reason = reason,

@@ -50,7 +50,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           Card(
             child: ListTile(
               onTap: () => _read(n),
-              leading: Icon(n['type'] == 'cash.shortage' ? Icons.point_of_sale : Icons.notifications,
+              leading: Icon((n['type'] == 'cash.shortage' || n['type'] == 'cash.withdrawal') ? Icons.point_of_sale : Icons.notifications,
                   color: n['readAt'] == null ? Theme.of(context).colorScheme.error : null),
               title: Text(n['title'] as String, style: TextStyle(fontWeight: n['readAt'] == null ? FontWeight.bold : FontWeight.normal)),
               subtitle: Text('${n['body']}\n${fmt.format(DateTime.parse(n['createdAt'] as String).toLocal())}'),

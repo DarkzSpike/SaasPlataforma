@@ -14,6 +14,10 @@ public sealed record DiscardRejectedRequest(string IdempotencyKey, string Reason
 public sealed record ReasonRequest(string Reason);
 
 /// <summary>Compras, clientes/fidelidade, financeiro, devoluções, conciliação e exportações.</summary>
+public sealed record CreditLimitRequest(long LimitCents);
+public sealed record NfeXmlRequest(string Xml);
+public sealed record CommissionRequest(decimal Percent);
+
 public static class BusinessEndpoints
 {
     public static void MapBusinessApi(this WebApplication app)
@@ -92,6 +96,111 @@ public static class BusinessEndpoints
         }).RequireFeature(ModuleKeys.Purchases, Permissions.PurchasesReceive, write: true);
 
         // ---------------- Clientes (CRM) ----------------
+        // ---------- Grade, kits e códigos adicionais ----------
+        var cat = api.MapGroup("/products");
+        cat.MapPost("/{id:guid}/variants", async (Guid id, GenerateVariantsRequest r, CatalogService s) => Results.Ok(await s.GenerateVariantsAsync(id, r)))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true);
+        cat.MapGet("/{id:guid}/variants", async (Guid id, CatalogService s) => Results.Ok(await s.VariantsAsync(id)))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
+        cat.MapPut("/{id:guid}/components", async (Guid id, List<KitComponentInput> r, CatalogService s) => Results.Ok(await s.SetComponentsAsync(id, r)))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true);
+        cat.MapGet("/{id:guid}/components", async (Guid id, CatalogService s) => Results.Ok(await s.ComponentsAsync(id)))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
+        cat.MapPost("/{id:guid}/barcodes", async (Guid id, BarcodeInput r, CatalogService s) => Results.Ok(await s.AddBarcodeAsync(id, r)))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true);
+        cat.MapDelete("/{id:guid}/barcodes/{code}", async (Guid id, string code, CatalogService s) => { await s.RemoveBarcodeAsync(id, code); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite);
+        cat.MapPost("/{id:guid}/barcodes/remove", async (Guid id, BarcodeInput r, CatalogService s) => { await s.RemoveBarcodeAsync(id, r.Code ?? ""); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite);
+        // Catálogo completo e enxuto para o PDV trabalhar offline (sem o limite de 200 da listagem).
+        api.MapGet("/catalog/products", async (AppDbContext db) => Results.Ok(await db.Products.AsNoTracking().Where(p => p.IsActive && !p.HasVariants)
+                .Select(p => new { p.Id, p.Sku, p.Barcode, p.Name, p.PriceCents, p.Unit }).ToListAsync()))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
+        // Todos os códigos adicionais (o PDV guarda no catálogo local para ler pelo leitor de código de barras offline).
+        api.MapGet("/catalog/barcodes", async (AppDbContext db) => Results.Ok(await db.ProductBarcodes.AsNoTracking().Select(b => new { b.ProductId, b.Code }).ToListAsync()))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
+
+        // ---------- Relatórios gerenciais e pacote do contador ----------
+        var rep = api.MapGroup("/reports");
+        rep.MapGet("/abc", async (ReportService s, DateTimeOffset from, DateTimeOffset to, Guid? storeId) => Results.Ok(await s.AbcAsync(from, to, storeId)))
+            .RequireFeature(ModuleKeys.ReportsPremium, Permissions.ReportsFinancial);
+        rep.MapGet("/turnover", async (ReportService s, DateTimeOffset from, DateTimeOffset to, Guid storeId) => Results.Ok(await s.TurnoverAsync(from, to, storeId)))
+            .RequireFeature(ModuleKeys.ReportsPremium, Permissions.ReportsFinancial);
+        rep.MapGet("/sellers", async (ReportService s, DateTimeOffset from, DateTimeOffset to, Guid? storeId) => Results.Ok(await s.SellersAsync(from, to, storeId)))
+            .RequireFeature(ModuleKeys.ReportsPremium, Permissions.ReportsFinancial);
+        rep.MapGet("/hours", async (ReportService s, DateTimeOffset from, DateTimeOffset to, Guid? storeId) => Results.Ok(await s.HoursAsync(from, to, storeId)))
+            .RequireFeature(ModuleKeys.ReportsPremium, Permissions.ReportsRead);
+        rep.MapGet("/dre", async (ReportService s, DateTimeOffset from, DateTimeOffset to, Guid? storeId) => Results.Ok(await s.DreAsync(from, to, storeId)))
+            .RequireFeature(ModuleKeys.ReportsPremium, Permissions.ReportsFinancial);
+        rep.MapGet("/accountant.zip", async (ReportService s, DateTimeOffset from, DateTimeOffset to) =>
+            Results.File(await s.AccountantPackageAsync(from, to), "application/zip", $"contador-{from:yyyyMMdd}-{to:yyyyMMdd}.zip"))
+            .RequireFeature(ModuleKeys.ReportsPremium, Permissions.ReportsExport);
+        api.MapPut("/users/{id:guid}/commission", async (Guid id, CommissionRequest r, AppDbContext db, AuditService audit, RequestActor a, ScopedLookup l) =>
+        {
+            if (r.Percent is < 0 or > 50) throw new DomainException("invalid_commission", "Comissão entre 0% e 50%.");
+            var u = await l.GetAsync<User>(id);
+            audit.Add("user.commission_changed", a.TenantId, nameof(User), u.Id, new { before = u.CommissionPercent, after = r.Percent });
+            u.CommissionPercent = r.Percent;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        }).RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
+
+        // ---------- Importação de NF-e (XML) e de planilha ----------
+        api.MapPost("/purchases/nfe/preview", async (NfeXmlRequest r, NfeImportService s) => Results.Ok(await s.PreviewAsync(r.Xml)))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockEntry);
+        api.MapPost("/purchases/nfe/import", async (NfeImportRequest r, NfeImportService s) => Results.Ok(await s.ConfirmAsync(r)))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockEntry, write: true).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(4_000_000));
+        api.MapGet("/purchases/nfe", async (AppDbContext db) => Results.Ok(await db.ImportedInvoices.AsNoTracking().OrderByDescending(x => x.ImportedAt).Take(100).ToListAsync()))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockEntry);
+        api.MapPost("/products/import-csv", async (CsvImportRequest r, ProductCsvImportService s) => Results.Ok(await s.ImportAsync(r)))
+            .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(4_000_000));
+
+        // ---------- Lotes/validade e transferências ----------
+        api.MapGet("/stock/expiring", async (BatchService s, int? days) => Results.Ok(await s.ExpiringAsync(days ?? 30)))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
+        api.MapPost("/stock/transfers", async (TransferRequest r, TransferService s) => Results.Ok(await s.CreateAsync(r)))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockAdjust, write: true);
+        api.MapGet("/stock/transfers", async (AppDbContext db) => Results.Ok(await db.StockTransfers.AsNoTracking().Include(t => t.Items).OrderByDescending(t => t.CreatedAt).Take(100).ToListAsync()))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
+        api.MapGet("/stock/consolidated", async (TransferService s) => Results.Ok(await s.ConsolidatedAsync()))
+            .RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
+
+        // ---------- Promoções e cupons ----------
+        var promos = api.MapGroup("/promotions");
+        promos.MapGet("/", async (AppDbContext db) => Results.Ok(await db.Promotions.AsNoTracking().OrderByDescending(p => p.CreatedAt).Take(300).ToListAsync()))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+        promos.MapGet("/active", async (PromotionService s) => Results.Ok(await s.ActiveRulesAsync()))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+        promos.MapPost("/", async (PromotionInput r, PromotionService s) => Results.Ok(await s.SaveAsync(null, r)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.ProductsWrite, write: true);
+        promos.MapPut("/{id:guid}", async (Guid id, PromotionInput r, PromotionService s) => Results.Ok(await s.SaveAsync(id, r)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.ProductsWrite, write: true);
+
+        // ---------- Orçamentos ----------
+        var quotes = api.MapGroup("/quotes");
+        quotes.MapGet("/", async (AppDbContext db, int? status) => Results.Ok(await db.Quotes.AsNoTracking().Include(q => q.Items)
+                .Where(q => status == null || (int)q.Status == status).OrderByDescending(q => q.CreatedAt).Take(200).ToListAsync()))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+        quotes.MapPost("/", async (CreateQuoteRequest r, QuoteService s) => Results.Ok(await s.CreateAsync(r)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate, write: true);
+        quotes.MapPost("/{id:guid}/cancel", async (Guid id, QuoteService s) => Results.Ok(await s.CancelAsync(id)))
+            .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
+
+        // ---------- Fiado (crediário) ----------
+        api.MapGet("/customers/{id:guid}/credit", async (Guid id, CreditService s) => Results.Ok(await s.StatementAsync(id)))
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.CustomersRead);
+        api.MapPost("/customers/{id:guid}/credit/receive", async (Guid id, ReceiveCreditRequest r, CreditService s) => Results.Ok(await s.ReceiveAsync(id, r)))
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.CashOperate, write: true);
+        api.MapPut("/customers/{id:guid}/credit-limit", async (Guid id, CreditLimitRequest r, AppDbContext db, ScopedLookup l, AuditService audit, RequestActor a) =>
+        {
+            if (r.LimitCents is < 0 or > 100_000_000) throw new DomainException("invalid_amount", "Limite inválido.");
+            var c = await l.GetAsync<Customer>(id);
+            audit.Add("customer.credit_limit", a.TenantId, nameof(Customer), c.Id, new { before = c.CreditLimitCents, after = r.LimitCents });
+            c.CreditLimitCents = r.LimitCents;
+            await db.SaveChangesAsync();
+            return Results.Ok(new { c.Id, c.CreditLimitCents });
+        }).RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceManage);
+
         var cus = api.MapGroup("/customers");
         cus.MapGet("/", async (AppDbContext db, string? q) =>
         {

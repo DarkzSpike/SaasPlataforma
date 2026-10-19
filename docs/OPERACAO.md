@@ -60,11 +60,58 @@ como membro) ou delegação de domínio (`ProductImages:GoogleDrive:ImpersonateU
 As fotos **não** ficam públicas: o PDV e o app leem pela API, que confere a empresa. Trocar de provedor não
 quebra as fotos antigas (a chave guarda o provedor). Status: **não testado contra o Google Drive real**.
 
+## Faturas e Mercado Pago (mensalidade do sistema)
+- **Geração automática:** o `BillingJob` roda a cada hora (`Billing:IntervalMinutes`) e cria a fatura do próximo
+  período quando faltam `Billing:LeadDays` (padrão 10) dias para o fim do período. Índice único por
+  empresa+assinatura+período: nunca duplica cobrança. O dono é avisado ("Nova fatura") e recebe 1 lembrete 3 dias antes.
+- **Painel administrativo:** menu *Faturas* (vencem em 3/7/30 dias e vencidas, "Gerar faturas agora", baixa manual com
+  MFA) e menu *Pagamentos* (Access Token, Public Key, assinatura secreta do webhook e endereço público da API —
+  segredos criptografados, nunca exibidos).
+- **Cliente (PDV → Faturas):** PIX com QR Code e copia-e-cola na própria tela; cartão e boleto pela página segura do
+  Mercado Pago (Checkout Pro). Funciona mesmo com licença restrita (é como o cliente regulariza).
+- **Confirmação:** só pelo Mercado Pago. Webhook `POST /webhooks/mercadopago` valida `x-signature` (HMAC-SHA256 de
+  `id:{data.id};request-id:{x-request-id};ts:{ts};`, janela de 10 min) e **consulta o pagamento na API do Mercado Pago**
+  antes de baixar (confere referência, valor e moeda). Botão "Já paguei" faz a mesma consulta quando o aviso não chega
+  (ex.: servidor sem endereço público). Idempotente por pagamento+status.
+- Status: integração escrita e testada com Mercado Pago simulado; **não testada contra a conta real** (exige credenciais).
+
+## Suporte rápido (painel → empresa → "Acessar loja")
+Sessão com prazo e motivo; o dono é avisado em Avisos/push. Sem consentimento, só consulta (produtos, estoque) e o
+técnico pode pedir liberação. Se o dono marcou em *PDV → Suporte* o que o suporte pode alterar sem pedir (produtos,
+estoque, usuários, terminais), a sessão aberta **com MFA** já vem com essas permissões. Vendas, caixa e fiscal nunca.
+
+### Por empresa, pelo painel administrativo (aba "Armazenamento")
+Cada empresa pode ter a **própria pasta e a própria credencial** (JSON da conta de serviço do Google). Tem prioridade
+sobre a configuração global acima; sem configuração, a empresa usa o padrão do servidor.
+- A credencial é validada (só `service_account`), criptografada com Data Protection (`DataProtection:KeysPath`
+  precisa ser persistente e ter backup — sem as chaves, as credenciais salvas deixam de abrir) e nunca é devolvida
+  pela API; o painel mostra apenas o e-mail da conta de serviço.
+- Alterar exige MFA + digitar o código da empresa; fica na auditoria (`tenant.storage_updated`) sem o segredo.
+- "Testar conexão" confere se a pasta existe e se a conta de serviço pode gravar nela.
+- Arquivos gravados assim usam a chave `gdrive-t:`; trocar a credencial por outra conta sem acesso à pasta antiga
+  impede a leitura das fotos antigas.
+
+## Cadastro com teste grátis e verificação em duas etapas
+- Painel → Planos → "Cadastro com teste grátis": liga/desliga, plano e dias (padrão: profissional, 14 dias). Exige o e-mail do sistema configurado.
+- O lojista cria a conta no caixa ("Criar conta grátis"); a empresa só é criada depois do código de 6 dígitos enviado por e-mail.
+- 2FA dos usuários: cada um ativa em "Minha conta". Perdeu o celular: dono/gerente usa "Remover 2 etapas" em Funcionários (fica na auditoria).
+
+## Banco local do caixa
+- `%LOCALAPPDATA%\ComercialPDV\local.db` é criptografado (SQLCipher). A chave fica em `local.key`, protegida pelo Windows (DPAPI) para o usuário atual.
+- Copiar só o `local.db` para outro computador não permite ler as vendas. Trocar de usuário do Windows exige entrar de novo (o caixa avisa).
+- Bancos antigos sem criptografia são convertidos sozinhos na primeira abertura, sem perder a fila de vendas.
+
+## Atualização dos caixas e deploy
+- Publicar versão: `dev/publish-pdv.ps1 -Version x.y.z -ApiUrl https://...` → subir o instalador em HTTPS → painel → Atualizações.
+- Produção (servidor, HTTPS, backup): [DEPLOY.md](DEPLOY.md).
+
 ## Checklist antes de produção (bloqueante)
-- [x] Suíte de testes rodando contra PostgreSQL com RLS ativo (local: 103 aprovados, 1 ignorado; job `postgres-integration` do CI configurado, ainda não executado no GitHub).
+- [x] Suíte de testes rodando contra PostgreSQL com RLS ativo (local, 19/10/2026: 176 aprovados, 1 ignorado; job `postgres-integration` do CI configurado, ainda não executado no GitHub).
 - [ ] Restauração de backup PostgreSQL cronometrada **no ambiente de homologação, com volume realista** (RTO real). Localmente já foi validada.
 - [ ] Provedor fiscal homologado integrado e testado na SEFAZ de homologação de cada UF atendida.
 - [ ] Provedor de pagamento real com adaptador de assinatura próprio e testes de webhook.
 - [ ] HTTPS com certificado válido, HSTS, WAF/rate limit na borda, logs centralizados e alertas.
 - [ ] Pentest externo e revisão de LGPD (DPO, base legal, política de retenção por tipo de dado).
-- [ ] Assinatura de código do instalador Windows e canal de atualização com reversão.
+- [x] Canal de atualização do caixa com assinatura própria + SHA-256 (painel → Atualizações). Reversão = publicar a versão anterior com número maior.
+- [ ] Assinatura de código (Authenticode) do instalador — normalmente exige CNPJ.
+- [ ] Primeiro deploy real seguindo [DEPLOY.md](DEPLOY.md) (arquivos Docker escritos, ainda não executados).

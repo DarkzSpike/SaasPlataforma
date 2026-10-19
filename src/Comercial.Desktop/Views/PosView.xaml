@@ -41,7 +41,12 @@
                                     <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE7B8;" Margin="0,0,10,0"/><TextBlock Text="Produto" Foreground="{DynamicResource TextBrush}"/></StackPanel>
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate><TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" FontSize="15"/></DataTemplate>
+                                    <DataTemplate>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" FontSize="15"/>
+                                            <TextBlock Text="{Binding PromoText}" Foreground="{DynamicResource PrimaryLightBrush}" FontSize="12" Visibility="{Binding HasPromo, Converter={StaticResource Vis}}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <DataGridTemplateColumn Width="110">
@@ -195,6 +200,9 @@
                     </StackPanel>
                 </StackPanel>
 
+                <TextBlock Text="{Binding PromoSummary}" Foreground="{DynamicResource PrimaryLightBrush}" FontWeight="SemiBold" Margin="0,12,0,0" Visibility="{Binding PromoSummary, Converter={StaticResource Vis}}"/>
+                <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE8EC;" local:Ui.Placeholder="Cupom de desconto (opcional)" Margin="0,12,0,0"
+                         Text="{Binding Coupon, UpdateSourceTrigger=LostFocus}" CharacterCasing="Upper" AutomationProperties.Name="Cupom de desconto"/>
                 <TextBlock Text="Forma de pagamento" Style="{StaticResource SectionTitle}" Margin="0,18,0,10"/>
                 <ComboBox Style="{StaticResource DarkCombo}" local:Ui.Icon="&#xE8C7;" ItemsSource="{Binding PaymentOptions}" SelectedItem="{Binding Method}" AutomationProperties.Name="Forma de pagamento">
                     <ComboBox.ItemTemplate>
@@ -202,16 +210,60 @@
                     </ComboBox.ItemTemplate>
                 </ComboBox>
                 <TextBlock Text="Valor recebido (R$)" Style="{StaticResource SectionTitle}" Margin="0,18,0,10"/>
-                <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE8C7;" local:Ui.Placeholder="Digite o valor recebido" Text="{Binding Paid, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Valor recebido"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE8C7;" local:Ui.Placeholder="Vazio = valor que falta" Text="{Binding Paid, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Valor recebido"/>
+                    <Button Grid.Column="1" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE710;" Width="50" Padding="0" Margin="8,0,0,0" Command="{Binding AddPaymentCommand}"
+                            ToolTip="Dividir: lançar este valor nesta forma e escolher outra para o resto" AutomationProperties.Name="Adicionar outra forma de pagamento"/>
+                </Grid>
+                <ItemsControl ItemsSource="{Binding PaymentLines}" Margin="0,8,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource Surface2Brush}" CornerRadius="8" Padding="12,4" Margin="0,0,0,6">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" local:Ui.Icon="&#xE711;" Height="28" Padding="6,0"
+                                            Command="{Binding DataContext.RemovePaymentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" ToolTip="Remover"/>
+                                    <TextBlock Text="{Binding Text}" Foreground="White" VerticalAlignment="Center"/>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="{Binding RemainingText}" Foreground="{DynamicResource WarnBrush}" FontWeight="SemiBold" Visibility="{Binding HasPaymentLines, Converter={StaticResource Vis}}"/>
 
                 <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE73E;" Content="Finalizar venda (F10)" Height="52" Margin="0,18,0,0" Command="{Binding FinishCommand}"/>
-                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE74D;" Content="Limpar" Margin="0,12,0,0" Command="{Binding ClearCommand}"/>
+                <Border Background="{DynamicResource Surface2Brush}" CornerRadius="8" Padding="14,8" Margin="0,14,0,0" Visibility="{Binding HasSaleDiscount, Converter={StaticResource Vis}}">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" local:Ui.Icon="&#xE711;" Height="30" Padding="6,0" Command="{Binding RemoveDiscountCommand}" ToolTip="Remover desconto" AutomationProperties.Name="Remover desconto"/>
+                        <TextBlock Text="{Binding SaleDiscountText}" Foreground="{DynamicResource WarnBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <UniformGrid Columns="3" Margin="0,12,0,0">
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8A5;" Content="Orçamento" Margin="0,0,6,0" Padding="4,0" Command="{Binding SaveQuoteCommand}"
+                            ToolTip="Salvar o carrinho como orçamento"/>
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8C7;" Content="Desconto" Margin="0,0,6,0" Command="{Binding DiscountCommand}"
+                            ToolTip="Desconto no total da venda (exige autorização do proprietário)"/>
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE74D;" Content="Limpar" Margin="6,0,0,0" Command="{Binding ClearCommand}"/>
+                </UniformGrid>
                 <Rectangle Height="1" Fill="{DynamicResource DarkBorderBrush}" Margin="0,16"/>
+                <TextBlock Text="{Binding StoreText}" Style="{StaticResource Muted}" Margin="0,0,0,8" AutomationProperties.Name="Situação da loja"/>
                 <UniformGrid Columns="2">
-                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE8C7;" Content="Abrir caixa" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenCashCommand}"/>
+                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE719;" Content="Abrir loja" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenStoreCommand}"
+                            ToolTip="Registra a abertura da loja (necessária para abrir o caixa)"/>
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE719;" Content="Fechar loja" Margin="5,0,0,10" Padding="8,0" Command="{Binding CloseStoreCommand}"
+                            ToolTip="Só fecha depois que o caixa for fechado"/>
+                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE8C7;" Content="Abrir caixa" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenCashCommand}"
+                            ToolTip="Só abre com a loja aberta"/>
                     <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE72E;" Content="Fechar caixa" Margin="5,0,0,10" Padding="8,0" Command="{Binding CloseCashCommand}"/>
-                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE719;" Content="Abrir loja" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenStoreCommand}"/>
-                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE719;" Content="Fechar loja" Margin="5,0,0,10" Padding="8,0" Command="{Binding CloseStoreCommand}"/>
+                </UniformGrid>
+                <UniformGrid Columns="2">
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE710;" Content="Suprimento" Margin="0,0,5,10" Padding="8,0" Command="{Binding SupplyCommand}"
+                            ToolTip="Colocar dinheiro na gaveta (reforço de troco)"/>
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8C7;" Content="Sangria" Margin="5,0,0,10" Padding="8,0" Command="{Binding WithdrawalCommand}"
+                            Foreground="{DynamicResource WarnBrush}" ToolTip="Retirada de dinheiro do caixa; o proprietário é avisado"/>
                 </UniformGrid>
                 <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE895;" Content="Sincronizar agora" Command="{Binding SyncCommand}"/>
             </StackPanel>

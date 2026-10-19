@@ -11,8 +11,10 @@ public sealed record CreateUserRequest(string Email, string DisplayName, string 
 public sealed record SetRolesRequest(List<string> Roles);
 public sealed record PermissionGrantInput(string Permission, bool Granted);
 public sealed record CreateDeviceRequest(string Name, string Platform, Guid? StoreId);
+public sealed record ResetPasswordRequest(string NewPassword);
 
-public sealed class UserService(AppDbContext db, RequestActor actor, AuditService audit, PasswordHasher hasher, AuthService auth, FeatureAuthorization features)
+public sealed class UserService(AppDbContext db, RequestActor actor, AuditService audit, PasswordHasher hasher, AuthService auth, FeatureAuthorization features,
+    EmailService mailer)
 {
     private void EnsureCanAssign(IEnumerable<string> roles)
     {
@@ -49,6 +51,9 @@ public sealed class UserService(AppDbContext db, RequestActor actor, AuditServic
         foreach (var role in r.Roles.Distinct()) u.Roles.Add(new UserRole { UserId = u.Id, Role = role });
         db.Users.Add(u);
         audit.Add("user.created", actor.TenantId, nameof(User), u.Id, new { email, r.Roles, r.StoreId });
+        var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == actor.TenantId);
+        var creator = await db.Users.AsNoTracking().Where(x => x.Id == actor.UserId).Select(x => x.DisplayName).FirstOrDefaultAsync() ?? "O responsável pela loja";
+        mailer.Welcome(actor.TenantId, email, u.DisplayName, tenant.Code, tenant.TradeName, creator);
         await db.SaveChangesAsync();
         return u;
     }
@@ -89,6 +94,19 @@ public sealed class UserService(AppDbContext db, RequestActor actor, AuditServic
         u.IsActive = active;
         if (!active) await auth.RevokeUserSessionsAsync(u.Id, "user_blocked");
         audit.Add(active ? "user.reactivated" : "user.blocked", actor.TenantId, nameof(User), u.Id);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Gestor define nova senha para o funcionário (ex.: esqueceu). Encerra as sessões abertas dele.</summary>
+    public async Task ResetPasswordAsync(Guid id, ResetPasswordRequest r)
+    {
+        var u = await GetManageableAsync(id);
+        if (u.Id == actor.UserId) throw new DomainException("self_change", "Para trocar a própria senha use a opção de perfil.", 403);
+        if (PasswordHasher.ValidatePolicy(r.NewPassword) is { } pe) throw new DomainException("weak_password", pe);
+        u.PasswordHash = hasher.Hash(r.NewPassword);
+        u.FailedLoginCount = 0; u.LockoutUntil = null;
+        await auth.RevokeUserSessionsAsync(u.Id, "password_reset_by_manager");
+        audit.Add("user.password_reset", actor.TenantId, nameof(User), u.Id);
         await db.SaveChangesAsync();
     }
 

@@ -24,6 +24,8 @@ public sealed class KeyMaterial
 
         LicenseSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var pem = config["License:PrivateKeyPem"];
+        // Em contêiner a chave PEM (várias linhas) vem de um arquivo de segredo montado.
+        if (string.IsNullOrWhiteSpace(pem) && config["License:PrivateKeyPemFile"] is { Length: > 0 } pemFile) pem = File.ReadAllText(pemFile);
         if (!string.IsNullOrWhiteSpace(pem)) LicenseSigningKey.ImportFromPem(pem);
         else if (!allowEphemeral) throw new InvalidOperationException("License:PrivateKeyPem não configurada.");
         else log.LogWarning("Chave de licença efêmera gerada (somente desenvolvimento).");

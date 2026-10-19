@@ -64,7 +64,8 @@ public class CommerceTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyncLife
         var denied = await api.Post("/api/v1/sales", op, Api.Sale(T.StoreId, opCash, product, pay: 800, discount: 200)); // 20%
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         Assert.Equal("discount_not_authorized", await Api.Code(denied));
-        await Api.Expect(await api.Post("/api/v1/sales", op, Api.Sale(T.StoreId, opCash, product, pay: 950, discount: 50)), HttpStatusCode.Created); // 5%
+        // Desconto no total, mesmo pequeno, exige autorização do proprietário.
+        Assert.Equal("discount_not_authorized", await Api.Code(await api.Post("/api/v1/sales", op, Api.Sale(T.StoreId, opCash, product, pay: 950, discount: 50))));
         await Api.Expect(await api.Post("/api/v1/sales", T.OwnerToken, Api.Sale(T.StoreId, cash, product, pay: 800, discount: 200)), HttpStatusCode.Created);
         var negative = await api.Post("/api/v1/sales", T.OwnerToken, Api.Sale(T.StoreId, cash, product, pay: 1000, discount: -100));
         Assert.Equal("invalid_discount", await Api.Code(negative));
@@ -289,5 +290,23 @@ public class CommerceTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyncLife
         Assert.Equal(2000, r.GetProperty("revenueCents").GetInt64());
         Assert.Equal(1000, r.GetProperty("cancelledCents").GetInt64());
         Assert.Equal(1200, r.GetProperty("grossProfitCents").GetInt64());
+    }
+    [Fact]
+    public async Task Caixa_so_abre_com_loja_aberta_e_loja_so_fecha_com_caixas_fechados()
+    {
+        var t = await api.CreateTenant("regra-" + Guid.NewGuid().ToString("N")[..6]);
+        object Ev(int type) => new { idempotencyKey = "ev-" + Guid.NewGuid().ToString("N"), storeId = t.StoreId, type, localTime = DateTimeOffset.UtcNow };
+
+        Assert.Equal("store_closed", await Api.Code(await api.Post("/api/v1/cash/sessions", t.OwnerToken, new { storeId = t.StoreId, openingCents = 0 })));
+        await Api.Expect(await api.Post("/api/v1/operating/events", t.OwnerToken, Ev(1)), HttpStatusCode.OK);
+        var (_, op, _) = await api.CreateUser(t, "operator");
+        var opStatus = await Api.Expect(await api.Get($"/api/v1/operating/status?storeId={t.StoreId}", op), HttpStatusCode.OK);
+        Assert.Equal("open", opStatus.GetProperty("state").GetString()); // operador consegue ver se a loja está aberta
+        var cash = (await Api.Expect(await api.Post("/api/v1/cash/sessions", op, new { storeId = t.StoreId, openingCents = 0 }), HttpStatusCode.OK)).GetProperty("id").GetGuid();
+
+        Assert.Equal("cash_open", await Api.Code(await api.Post("/api/v1/operating/events", t.OwnerToken, Ev(2))));
+        await Api.Expect(await api.Post($"/api/v1/cash/sessions/{cash}/close", op, new { declaredCashCents = 0 }), HttpStatusCode.OK);
+        await Api.Expect(await api.Post("/api/v1/operating/events", t.OwnerToken, Ev(2)), HttpStatusCode.OK);
+        Assert.Equal("store_closed", await Api.Code(await api.Post("/api/v1/cash/sessions", op, new { storeId = t.StoreId, openingCents = 0 })));
     }
 }

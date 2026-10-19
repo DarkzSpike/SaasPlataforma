@@ -56,7 +56,8 @@ public sealed class LicenseService(AppDbContext db, KeyMaterial keys, IConfigura
 
     public static HashSet<string> Resolve(HashSet<string> enabled, IReadOnlyDictionary<string, ModuleDefinition> catalog)
     {
-        var result = new HashSet<string> { ModuleKeys.Core };
+        // Módulos do núcleo (ex.: faturas) estão sempre ativos.
+        var result = new HashSet<string>(catalog.Values.Where(c => c.IsCore).Select(c => c.Key)) { ModuleKeys.Core };
         var path = new HashSet<string>(); // caminho atual da busca (detecta ciclo sem confundir com dependência compartilhada)
         bool Ok(string key)
         {

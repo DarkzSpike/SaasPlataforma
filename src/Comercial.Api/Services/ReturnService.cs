@@ -62,7 +62,7 @@ public sealed class ReturnService(AppDbContext db, RequestActor actor, AuditServ
             foreach (var i in ret.Items)
             {
                 var item = sale.Items.First(x => x.Id == i.SaleItemId);
-                await stock.MoveAsync(sale.StoreId, i.ProductId, i.Quantity, StockMovementType.Return, "Devolução: " + ret.Reason, ret.Id, item.UnitCostCents);
+                await stock.MoveExpandedAsync(sale.StoreId, i.ProductId, i.Quantity, StockMovementType.Return, "Devolução: " + ret.Reason, ret.Id, item.UnitCostCents);
             }
         await tx.CommitAsync();
         return ret;

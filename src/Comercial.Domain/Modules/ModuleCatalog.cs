@@ -75,6 +75,7 @@ public static class ModuleKeys
     public const string CustomDomain = "dominio";
     public const string ReportsPremium = "relatorios_premium";
     public const string Notifications = "notificacoes";
+    public const string Invoices = "faturas";
 }
 
 /// <summary>
@@ -96,6 +97,8 @@ public static class ModuleCatalogSeed
         {
             new() { Key = ModuleKeys.Core, Name = "Núcleo", Category = "Plataforma", Status = R, IsCore = true, AvailableAsAddOn = false,
                     Description = "Autenticação, usuários básicos, dispositivos, licença e identidade visual publicada." },
+            new() { Key = ModuleKeys.Invoices, Name = "Faturas e pagamento da mensalidade", Category = "Plataforma", Status = R, IsCore = true, AvailableAsAddOn = false,
+                    Description = "Faturas geradas automaticamente; pagamento por PIX, boleto ou cartão (Mercado Pago). Sempre disponível, inclusive com licença restrita." },
             // A — Operação essencial
             M(ModuleKeys.Pdv, "PDV e vendas", "A - Operação essencial", R, "Vendas, pagamentos múltiplos, cancelamentos auditados, idempotência.", ModuleKeys.Products, ModuleKeys.Stock, ModuleKeys.Cash),
             M(ModuleKeys.Products, "Produtos e catálogo", "A - Operação essencial", R, "Cadastro de produtos, SKU, código de barras, preço e custo."),

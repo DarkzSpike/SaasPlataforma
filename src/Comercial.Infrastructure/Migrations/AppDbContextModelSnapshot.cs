@@ -348,6 +348,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long>("CreditLimitCents")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Document")
                         .HasColumnType("text");
 
@@ -433,6 +436,108 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("devices", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.DiscountAuthorization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApproverUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MaxDiscountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("SubtotalCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UsedBySaleId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.ToTable("discount_authorizations", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.EmailMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("HtmlBody")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("To")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.ToTable("email_messages", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.FinancialTitle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -499,6 +604,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<Guid?>("PurchaseOrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("SaleId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -532,13 +640,31 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("AuthorizedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("CancelReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DanfeUrl")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Environment")
+                        .HasColumnType("integer");
 
                     b.Property<string>("LastMessage")
                         .HasColumnType("text");
 
                     b.Property<int>("Model")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Number")
                         .HasColumnType("integer");
 
                     b.Property<string>("Protocol")
@@ -547,14 +673,26 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<string>("ProviderName")
                         .HasColumnType("text");
 
+                    b.Property<string>("ProviderRef")
+                        .HasColumnType("text");
+
+                    b.Property<string>("QrCodeUrl")
+                        .HasColumnType("text");
+
                     b.Property<Guid>("SaleId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("Series")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("XmlUrl")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -594,6 +732,98 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("fiscal_events", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.FiscalNumberVoid", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FirstNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LastNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Protocol")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Series")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("fiscal_number_voids", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ImportedInvoice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccessKey")
+                        .IsRequired()
+                        .HasMaxLength(44)
+                        .HasColumnType("character varying(44)");
+
+                    b.Property<DateTimeOffset>("ImportedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ImportedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Items")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SupplierName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("TotalCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccessKey")
+                        .IsUnique();
+
+                    b.ToTable("imported_invoices", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.Invoice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -603,11 +833,38 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<long>("AmountCents")
                         .HasColumnType("bigint");
 
+                    b.Property<DateTimeOffset?>("AvailableNotifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CheckoutPreferenceId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("CheckoutUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("DueAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("MpPaymentId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PaidMethod")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTimeOffset>("PeriodEnd")
                         .HasColumnType("timestamp with time zone");
@@ -615,8 +872,20 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("PeriodStart")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("PixCopyPaste")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("PixExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PixQrBase64")
+                        .HasColumnType("text");
+
                     b.Property<string>("ProviderReference")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ReminderSentAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -629,7 +898,13 @@ namespace Comercial.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Status", "DueAt");
+
                     b.HasIndex("TenantId", "Status");
+
+                    b.HasIndex("TenantId", "SubscriptionId", "PeriodStart")
+                        .IsUnique()
+                        .HasFilter("\"Status\" <> 3");
 
                     b.ToTable("invoices", (string)null);
                 });
@@ -759,6 +1034,54 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("module_dependencies", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.NfseDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("InvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("IssuedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastMessage")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Number")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PdfUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VerificationCode")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvoiceId")
+                        .IsUnique();
+
+                    b.ToTable("nfse_documents", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.Notification", b =>
                 {
                     b.Property<Guid>("Id")
@@ -876,6 +1199,42 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("operating_events", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.PasswordResetToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId", "CreatedAt");
+
+                    b.ToTable("password_reset_tokens", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.PaymentEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -922,6 +1281,56 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("payment_events", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.PendingSignup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Ip")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("PayloadProtected")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TenantCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantCode");
+
+                    b.HasIndex("Email", "CreatedAt");
+
+                    b.ToTable("pending_signups", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.PlanModule", b =>
                 {
                     b.Property<Guid>("PlanId")
@@ -937,6 +1346,85 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("plan_modules", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.PlatformSetting", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsSecret")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByAdminId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Value")
+                        .HasColumnType("text");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("platform_settings", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.PosPixCharge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CashSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MpPaymentId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("QrBase64")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("QrCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UsedBySaleId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.ToTable("pos_pix_charges", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.Product", b =>
                 {
                     b.Property<Guid>("Id")
@@ -949,6 +1437,12 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Cest")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Cfop")
+                        .HasColumnType("text");
+
                     b.Property<long>("CostCents")
                         .HasColumnType("bigint");
 
@@ -956,6 +1450,21 @@ namespace Comercial.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<int>("FiscalOrigin")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("HasVariants")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("IbsCbsClass")
+                        .HasColumnType("text");
+
+                    b.Property<string>("IbsCbsCst")
+                        .HasColumnType("text");
+
+                    b.Property<string>("IcmsCst")
                         .HasColumnType("text");
 
                     b.Property<string>("ImageContentType")
@@ -972,6 +1481,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsKit")
+                        .HasColumnType("boolean");
+
                     b.Property<decimal>("MinStock")
                         .HasPrecision(18, 3)
                         .HasColumnType("numeric(18,3)");
@@ -979,6 +1491,12 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("Ncm")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ParentProductId")
+                        .HasColumnType("uuid");
 
                     b.Property<long>("PriceCents")
                         .HasColumnType("bigint");
@@ -997,6 +1515,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("VariantLabel")
+                        .HasColumnType("text");
+
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("integer");
@@ -1009,6 +1530,169 @@ namespace Comercial.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("products", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ProductBarcode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ProductId");
+
+                    b.ToTable("product_barcodes", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ProductBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("AlertedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BatchCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("ExpiresOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("QuantityReceived")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<decimal>("QuantityRemaining")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StoreId", "ProductId", "ExpiresOn");
+
+                    b.ToTable("product_batches", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ProductComponent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ComponentProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("KitProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ComponentProductId");
+
+                    b.HasIndex("TenantId", "KitProductId", "ComponentProductId")
+                        .IsUnique();
+
+                    b.ToTable("product_components", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.Promotion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("BuyQty")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CouponCode")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("MinQty")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("PayQty")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Percent")
+                        .HasPrecision(7, 3)
+                        .HasColumnType("numeric(7,3)");
+
+                    b.Property<Guid?>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("StartsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("UnitPriceCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("promotions", (string)null);
                 });
 
             modelBuilder.Entity("Comercial.Domain.PurchaseItem", b =>
@@ -1181,6 +1865,91 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("push_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.Quote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CustomerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("SaleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("TotalCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("ValidUntil")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("quotes", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.QuoteItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("QuoteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("UnitPriceCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("QuoteId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("quote_items", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.Sale", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1202,6 +1971,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<long>("ChangeCents")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("CouponCode")
+                        .HasColumnType("text");
+
                     b.Property<bool>("CreatedOffline")
                         .HasColumnType("boolean");
 
@@ -1209,6 +1981,9 @@ namespace Comercial.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DiscountAuthorizedByUserId")
                         .HasColumnType("uuid");
 
                     b.Property<long>("DiscountCents")
@@ -1228,6 +2003,12 @@ namespace Comercial.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.Property<Guid>("OperatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("PromotionDiscountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("QuoteId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("ReceivedAt")
@@ -1485,6 +2266,70 @@ namespace Comercial.Infrastructure.Migrations
                     b.HasIndex("TenantId", "ProductId", "CreatedAt");
 
                     b.ToTable("stock_movements", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.StockTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FromStoreId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ToStoreId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("stock_transfers", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.StockTransferItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TransferId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TransferId");
+
+                    b.ToTable("stock_transfer_items", (string)null);
                 });
 
             modelBuilder.Entity("Comercial.Domain.Store", b =>
@@ -1860,6 +2705,15 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<DateTimeOffset?>("SupportPreAuthorizedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SupportPreAuthorizedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SupportPreAuthorizedOperations")
+                        .HasColumnType("text");
+
                     b.Property<string>("SuspensionReason")
                         .HasColumnType("text");
 
@@ -1896,6 +2750,85 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("tenant_branding", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.TenantFiscalProfile", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoEmit")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("CbsRate")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric(7,4)");
+
+                    b.Property<string>("Cnpj")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)");
+
+                    b.Property<string>("DefaultCfop")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DefaultCofinsCst")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DefaultIbsCbsClass")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DefaultIbsCbsCst")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DefaultIcmsCst")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DefaultPisCst")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Environment")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("IbsRate")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric(7,4)");
+
+                    b.Property<int>("NfceSeries")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ProviderTokenProtected")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Regime")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StateRegistration")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Uf")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("tenant_fiscal_profiles", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.TenantModule", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -1926,11 +2859,93 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("tenant_modules", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.TenantPaymentSettings", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MpAccessTokenProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MpAccountLabel")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("PixEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("tenant_payment_settings", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.TenantStorageSettings", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CredentialsClientEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("CredentialsProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DriveFolderId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ImpersonateUser")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("LastTestAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastTestMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool?>("LastTestOk")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByAdminId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("tenant_storage_settings", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("CommissionPercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1965,6 +2980,15 @@ namespace Comercial.Infrastructure.Migrations
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("TotpEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("TotpLastStep")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TotpSecretProtected")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -2151,6 +3175,15 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.DiscountAuthorization", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.FinancialTitle", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
@@ -2177,6 +3210,24 @@ namespace Comercial.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("Comercial.Domain.FiscalEvent", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.FiscalNumberVoid", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ImportedInvoice", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
                         .WithMany()
@@ -2259,6 +3310,15 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.PasswordResetToken", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.PlanModule", b =>
                 {
                     b.HasOne("Comercial.Domain.Modules.ModuleDefinition", null)
@@ -2274,7 +3334,73 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.PosPixCharge", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.Product", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ProductBarcode", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Comercial.Domain.Product", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ProductId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ProductBatch", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.ProductComponent", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Comercial.Domain.Product", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ComponentProductId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Comercial.Domain.Product", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "KitProductId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.Promotion", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
                         .WithMany()
@@ -2340,6 +3466,30 @@ namespace Comercial.Infrastructure.Migrations
 
             modelBuilder.Entity("Comercial.Domain.PushToken", b =>
                 {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.Quote", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.QuoteItem", b =>
+                {
+                    b.HasOne("Comercial.Domain.Quote", null)
+                        .WithMany("Items")
+                        .HasForeignKey("QuoteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Comercial.Domain.Tenant", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -2493,6 +3643,30 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.StockTransfer", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.StockTransferItem", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Comercial.Domain.StockTransfer", null)
+                        .WithMany("Items")
+                        .HasForeignKey("TransferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.Store", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
@@ -2547,6 +3721,15 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.TenantFiscalProfile", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.TenantModule", b =>
                 {
                     b.HasOne("Comercial.Domain.Modules.ModuleDefinition", null)
@@ -2555,6 +3738,24 @@ namespace Comercial.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.TenantPaymentSettings", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.TenantStorageSettings", b =>
+                {
                     b.HasOne("Comercial.Domain.Tenant", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -2615,6 +3816,11 @@ namespace Comercial.Infrastructure.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("Comercial.Domain.Quote", b =>
+                {
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("Comercial.Domain.Sale", b =>
                 {
                     b.Navigation("Items");
@@ -2623,6 +3829,11 @@ namespace Comercial.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("Comercial.Domain.SaleReturn", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Comercial.Domain.StockTransfer", b =>
                 {
                     b.Navigation("Items");
                 });

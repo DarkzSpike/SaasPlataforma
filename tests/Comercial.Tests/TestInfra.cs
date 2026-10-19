@@ -47,6 +47,10 @@ public class ApiFactory : WebApplicationFactory<Program>
         b.UseSetting("Security:Argon2Iterations", "1");
         b.UseSetting("RateLimit:AuthPerMinute", AuthRateLimit.ToString());
         b.UseSetting("RateLimit:GlobalPerMinute", "100000");
+        b.UseSetting("RateLimit:WebhookPerMinute", "100000");
+        b.UseSetting("Billing:AutoRun", "false"); // os testes disparam o faturamento explicitamente
+        b.UseSetting("Email:AutoRun", "false");
+        b.UseSetting("Fiscal:AutoRun", "false");
         b.UseSetting("Jwt:TenantSigningKey", TenantJwtKey);
         b.UseSetting("Storage:Root", StorageRoot);
         b.UseSetting("Payments:generic:WebhookSecret", WebhookSecret);
@@ -60,6 +64,20 @@ public class ApiFactory : WebApplicationFactory<Program>
         using var scope = Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<TenantContext>().SetPlatformScope();
         await action(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+    }
+
+    public async Task WithScope(Func<IServiceProvider, Task> action)
+    {
+        using var scope = Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<TenantContext>().SetPlatformScope();
+        await action(scope.ServiceProvider);
+    }
+
+    public async Task<T> WithScopeResult<T>(Func<IServiceProvider, Task<T>> action)
+    {
+        using var scope = Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<TenantContext>().SetPlatformScope();
+        return await action(scope.ServiceProvider);
     }
 
     public async Task<T> WithDb<T>(Func<AppDbContext, Task<T>> action)
@@ -129,6 +147,7 @@ public sealed class Api(ApiFactory factory)
     public Task<HttpResponseMessage> Get(string path, string? token, Dictionary<string, string>? h = null) => Send(HttpMethod.Get, path, token, null, h);
     public Task<HttpResponseMessage> Post(string path, string? token, object? body = null, Dictionary<string, string>? h = null) => Send(HttpMethod.Post, path, token, body ?? new { }, h);
     public Task<HttpResponseMessage> Put(string path, string? token, object body, Dictionary<string, string>? h = null) => Send(HttpMethod.Put, path, token, body, h);
+    public Task<HttpResponseMessage> Delete(string path, string? token) => Send(HttpMethod.Delete, path, token, null, null);
 
     public static async Task<JsonElement> Expect(HttpResponseMessage res, HttpStatusCode status)
     {
@@ -183,8 +202,15 @@ public sealed class Api(ApiFactory factory)
     public async Task StockEntry(string token, Guid store, Guid product, decimal qty) =>
         await Expect(await Post("/api/v1/stock/entries", token, new { storeId = store, productId = product, quantity = qty, unitCostCents = 600, reason = "carga inicial" }), HttpStatusCode.NoContent);
 
-    public async Task<Guid> OpenCash(string token, Guid store, long opening = 10000) =>
-        (await Expect(await Post("/api/v1/cash/sessions", token, new { storeId = store, openingCents = opening }), HttpStatusCode.OK)).GetProperty("id").GetGuid();
+    /// <summary>Abre a loja (regra: caixa só abre com a loja aberta) e depois o caixa.</summary>
+    public async Task<Guid> OpenCash(string token, Guid store, long opening = 10000)
+    {
+        await OpenStore(token, store);
+        return (await Expect(await Post("/api/v1/cash/sessions", token, new { storeId = store, openingCents = opening }), HttpStatusCode.OK)).GetProperty("id").GetGuid();
+    }
+
+    public async Task OpenStore(string token, Guid store) =>
+        await Expect(await Post("/api/v1/operating/events", token, new { idempotencyKey = "open-" + Guid.NewGuid().ToString("N"), storeId = store, type = 1, localTime = DateTimeOffset.UtcNow }), HttpStatusCode.OK);
 
     public static CreateSaleRequest Sale(Guid store, Guid cash, Guid product, decimal qty = 1, long pay = 1000, int method = 1, string? key = null, long discount = 0, long? clientPrice = null) =>
         new(key ?? Guid.NewGuid().ToString("N"), store, cash, DateTimeOffset.UtcNow, [new SaleItemRequest(product, qty, 0, clientPrice)], [new SalePaymentRequest(method, pay)], discount);

@@ -1,0 +1,51 @@
+<UserControl x:Class="Comercial.Desktop.Views.ReportsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Comercial.Desktop">
+    <DockPanel>
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+            <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE896;" Content="Pacote do contador (ZIP)" Padding="16,0" Command="{Binding AccountantCommand}"
+                    ToolTip="Vendas, NFC-e, contas pagas/recebidas e produtos do período"/>
+            <ComboBox Style="{StaticResource DarkCombo}" ItemsSource="{Binding KindOptions}" SelectedItem="{Binding Kind}" Width="420" HorizontalAlignment="Left" AutomationProperties.Name="Relatório"/>
+        </DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Foreground="White" FontWeight="SemiBold" Margin="0,0,0,10" TextWrapping="Wrap"/>
+        <Border Style="{StaticResource Card}" ClipToBounds="True">
+            <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Rows}" AutomationProperties.Name="Relatório">
+                <DataGrid.Columns>
+                    <DataGridTemplateColumn Width="*">
+                        <DataGridTemplateColumn.Header><TextBlock Text="{Binding DataContext.H1, RelativeSource={RelativeSource AncestorType=DataGrid}}"/></DataGridTemplateColumn.Header>
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding C1}" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Tag}" Value="A"><Setter Property="Foreground" Value="{DynamicResource PrimaryLightBrush}"/><Setter Property="FontWeight" Value="Bold"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Tag}" Value="C"><Setter Property="Foreground" Value="{DynamicResource WarnBrush}"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Tag}" Value="B"><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Binding="{Binding C2}" Width="200">
+                        <DataGridTextColumn.Header><TextBlock Text="{Binding DataContext.H2, RelativeSource={RelativeSource AncestorType=DataGrid}}"/></DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding C3}" Width="160">
+                        <DataGridTextColumn.Header><TextBlock Text="{Binding DataContext.H3, RelativeSource={RelativeSource AncestorType=DataGrid}}"/></DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding C4}" Width="160">
+                        <DataGridTextColumn.Header><TextBlock Text="{Binding DataContext.H4, RelativeSource={RelativeSource AncestorType=DataGrid}}"/></DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding C5}" Width="190">
+                        <DataGridTextColumn.Header><TextBlock Text="{Binding DataContext.H5, RelativeSource={RelativeSource AncestorType=DataGrid}}"/></DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </DockPanel>
+</UserControl>

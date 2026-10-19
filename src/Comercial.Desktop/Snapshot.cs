@@ -32,7 +32,7 @@ public static class Snapshot
                 TenantName = "Loja Demo", License = "active",
                 Permissions = ["sales.read", "sales.cancel", "reports.read", "reports.financial", "stock.read", "cash.review", "cash.operate", "sales.create", "products.write", "stock.entry", "stock.adjust",
                     "purchases.manage", "suppliers.manage", "purchases.approve", "purchases.receive", "customers.read", "customers.manage", "customers.privacy",
-                    "loyalty.manage", "finance.read", "finance.manage", "sync.reconcile", "reports.export", "sales.return"],
+                    "loyalty.manage", "finance.read", "finance.manage", "sync.reconcile", "reports.export", "sales.return", "billing.manage", "support.approve", "users.manage", "sales.discount.authorize"],
                 Modules = ["pdv", "estoque", "caixa", "app_proprietario", "lucratividade", "white_label", "compras", "fornecedores", "crm", "fidelidade",
                     "contas", "financeiro", "despesas", "trocas", "relatorios_premium"],
             },
@@ -47,6 +47,14 @@ public static class Snapshot
         Save(window, Path.Combine(dir, "01-login.png"));
         login.Status = "Usuário ou senha inválidos.";
         Save(window, Path.Combine(dir, "02-login-erro.png"));
+        login.NeedTotp = true; login.Status = "Digite o código de 6 dígitos do aplicativo autenticador.";
+        Save(window, Path.Combine(dir, "02b-login-2fa.png"));
+        login.NeedTotp = false;
+        login.SignupMode = true; login.CompanyName = "Mercadinho São João"; login.OwnerName = "João"; login.Email = "joao@exemplo.test";
+        login.Status = "Crie a conta da sua loja. Você recebe um código no e-mail para confirmar.";
+        Save(window, Path.Combine(dir, "02c-cadastro.png"));
+        login.SignupSent = true; login.Status = "Enviamos um código de 6 dígitos para joao@exemplo.test (vale 30 minutos).";
+        Save(window, Path.Combine(dir, "02d-cadastro-codigo.png"));
 
         var shell = new ShellViewModel(main, "dona@loja-demo.test", startTimers: false);
         main.Current = shell;
@@ -235,6 +243,58 @@ public static class Snapshot
         alerts.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(alerts, ["IsEmpty"]);
         shell.ShowForPreview("alerts", alerts);
         Save(window, Path.Combine(dir, "17-avisos.png"));
+
+        var inv = new InvoicesViewModel(shell);
+        static System.Text.Json.JsonElement J(string s) => System.Text.Json.JsonDocument.Parse(s).RootElement;
+        var due = DateTimeOffset.Now.AddDays(2);
+        inv.Items.Add(InvoicesViewModel.Row(J($$"""{"id":"{{Guid.NewGuid()}}","amountCents":14990,"dueAt":"{{due:O}}","periodStart":"{{due:O}}","periodEnd":"{{due.AddMonths(1):O}}","status":"aberta","overdue":false,"daysToDue":2,"pixCopyPaste":"00020126580014br.gov.bcb.pix0136a1b2c3d4-exemplo-de-codigo-pix-copia-e-cola5204000053039865406149.905802BR5913LOJA DEMO6009SAO PAULO62070503***6304ABCD","pixQrBase64":"{{Convert.ToBase64String(SamplePng(20, 20, 20))}}","pixExpiresAt":"{{DateTimeOffset.Now.AddHours(23):O}}"}""")));
+        inv.Items.Add(InvoicesViewModel.Row(J($$"""{"id":"{{Guid.NewGuid()}}","amountCents":14990,"dueAt":"{{due.AddMonths(-1):O}}","periodStart":"{{due.AddMonths(-1):O}}","periodEnd":"{{due:O}}","status":"paga","overdue":false,"daysToDue":-28,"paidAt":"{{due.AddMonths(-1).AddDays(-1):O}}","paidMethod":"pix"}""")));
+        inv.Banner = "Sua fatura de R$ 149,90 vence em 2 dia(s).";
+        inv.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(inv, ["IsEmpty"]);
+        shell.ShowForPreview("invoices", inv);
+        Save(window, Path.Combine(dir, "18-faturas.png"));
+
+        var sup = new SupportViewModel(shell);
+        sup.Options.Add(new SupportOption { Key = "products.write", Name = "cadastro de produtos", Checked = true });
+        sup.Options.Add(new SupportOption { Key = "stock.adjust", Name = "ajuste de estoque", Checked = true });
+        sup.Options.Add(new SupportOption { Key = "users.manage", Name = "usuários" });
+        sup.Options.Add(new SupportOption { Key = "devices.manage", Name = "terminais" });
+        sup.Requests.Add(new SupportRequestRow(Guid.NewGuid(), SupportViewModel.Ops("users.manage") + " por 15 min — Cliente pediu para desbloquear o usuário do caixa 2", "18/10 15:02"));
+        sup.Sessions.Add(new SupportSessionRow(Guid.NewGuid(), "18/10/2026 14:55 — Ajustar preços que vieram errados da planilha", "ATIVA, pode alterar: " + SupportViewModel.Ops("products.write,stock.adjust") + " • até 15:55", true));
+        sup.Sessions.Add(new SupportSessionRow(Guid.NewGuid(), "12/10/2026 10:20 — Dúvida sobre fechamento de caixa", "Encerrada: encerrada pelo suporte", false));
+        sup.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(sup, ["NoRequests"]);
+        shell.ShowForPreview("support", sup);
+        Save(window, Path.Combine(dir, "19-suporte.png"));
+
+        var emp = new EmployeesViewModel(shell);
+        foreach (var (k, n) in new[] { ("operator", "Operador de caixa"), ("stockist", "Estoquista"), ("finance", "Financeiro"), ("manager", "Gerente") }) emp.RoleOptions.Add(new RoleOption(k, n));
+        foreach (var (k, n, on) in new[] { ("sales.create", "Vender (PDV)", true), ("sales.read", "Ver histórico de vendas", true), ("cash.operate", "Abrir/fechar o próprio caixa e sangria", true),
+                     ("operating.openclose", "Abrir e fechar a loja", true), ("customers.manage", "Cadastrar clientes", true), ("sales.cancel", "Cancelar vendas", false),
+                     ("sales.discount.authorize", "Autorizar desconto no total da venda", false), ("stock.entry", "Lançar entrada de mercadoria", true), ("reports.read", "Ver painel e relatórios", false), ("products.write", "Cadastrar e editar produtos", false) })
+            emp.PermissionsList.Add(new PermissionOption { Key = k, Name = n, CanGrant = true, FromRole = on && k != "stock.entry", Checked = on });
+        emp.Users.Add(new EmployeeRow { Id = Guid.NewGuid(), Name = "Dona Demo", Email = "dona@loja-demo.test", Role = "owner", Active = true, IsMe = true });
+        emp.Users.Add(new EmployeeRow { Id = Guid.NewGuid(), Name = "Carlos Souza", Email = "carlos@loja-demo.test", Role = "operator", Active = true });
+        emp.Users.Add(new EmployeeRow { Id = Guid.NewGuid(), Name = "Ana Lima", Email = "ana@loja-demo.test", Role = "manager", Active = true });
+        emp.Users.Add(new EmployeeRow { Id = Guid.NewGuid(), Name = "Pedro Alves", Email = "pedro@loja-demo.test", Role = "stockist", Active = false });
+        var keepPerms = emp.PermissionsList.Select(x => (x.Key, x.Name, x.FromRole, x.Checked)).ToList();
+        emp.Selected = emp.Users[1];
+        emp.PermissionsList.Clear();
+        foreach (var (k, n, fr, c) in keepPerms) emp.PermissionsList.Add(new PermissionOption { Key = k, Name = n, CanGrant = true, FromRole = fr, Checked = c });
+        shell.ShowForPreview("employees", emp);
+        Save(window, Path.Combine(dir, "20-funcionarios.png"));
+
+        var acc = new AccountViewModel(shell);
+        using (var gen = new QRCoder.QRCodeGenerator())
+        using (var data = gen.CreateQrCode("otpauth://totp/Sistema%20Comercial:dona@loja-demo.test?secret=JBSWY3DPEHPK3PXP&issuer=Demo", QRCoder.QRCodeGenerator.ECCLevel.M))
+            acc.Qr = FormViewModel.Load(new QRCoder.PngByteQRCode(data).GetGraphic(8));
+        acc.Secret = "JBSW Y3DP EHPK 3PXP"; acc.SettingUp = true;
+        acc.Info = "Abra o aplicativo autenticador no celular, leia o QR Code (ou digite a chave) e confirme com o código de 6 dígitos.";
+        shell.ShowForPreview("account", acc);
+        Save(window, Path.Combine(dir, "21-minha-conta-2fa.png"));
+
+        shell.SetUpdateForPreview("Nova versão 1.1.0 disponível: PIX mais rápido e correções no fechamento de caixa.");
+        shell.ShowForPreview("help", new HelpViewModel(shell));
+        Save(window, Path.Combine(dir, "22-ajuda-e-atualizacao.png"));
 
         window.Close();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

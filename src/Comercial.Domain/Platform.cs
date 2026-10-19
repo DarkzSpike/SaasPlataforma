@@ -148,3 +148,25 @@ public class BrandingAsset : TenantEntity
     public Guid UploadedByAdminId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// Onde ficam os arquivos (fotos de produtos) de cada empresa. Configurado pelo painel administrativo.
+/// A credencial da API (conta de serviço do Google) é guardada CRIPTOGRAFADA e nunca é devolvida pela API.
+/// </summary>
+public class TenantStorageSettings : ITenantScoped
+{
+    public Guid TenantId { get; set; }
+    /// <summary>"local" (servidor) ou "gdrive" (Google Drive da empresa).</summary>
+    public string Provider { get; set; } = "local";
+    public string? DriveFolderId { get; set; }
+    public string? ImpersonateUser { get; set; }
+    public string? CredentialsProtected { get; set; }
+    /// <summary>E-mail da conta de serviço (para conferência; não é segredo).</summary>
+    public string? CredentialsClientEmail { get; set; }
+    public int Version { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? UpdatedByAdminId { get; set; }
+    public DateTimeOffset? LastTestAt { get; set; }
+    public bool? LastTestOk { get; set; }
+    public string? LastTestMessage { get; set; }
+}

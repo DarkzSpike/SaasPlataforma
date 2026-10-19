@@ -1,0 +1,13 @@
+# Painel administrativo (arquivos estáticos + cabeçalhos de segurança).
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY . .
+RUN dotnet publish src/Comercial.AdminWeb -c Release -o /out -p:DebugType=none
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /out .
+USER $APP_UID
+ENV ASPNETCORE_HTTP_PORTS=8080
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "Comercial.AdminWeb.dll"]

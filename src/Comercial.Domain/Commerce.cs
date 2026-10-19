@@ -26,6 +26,20 @@ public class Product : TenantEntity
     /// <summary>Controle de concorrência otimista (incrementado a cada alteração).</summary>
     public int Version { get; set; } = 1;
     /// <summary>Chave da foto no armazenamento configurado (local ou Google Drive). Nunca é uma URL pública.</summary>
+    /// <summary>Grade: variação (ex.: tamanho/cor) aponta para o produto "pai"; o pai com variações não é vendido direto.</summary>
+    public Guid? ParentProductId { get; set; }
+    public string? VariantLabel { get; set; }
+    public bool HasVariants { get; set; }
+    /// <summary>Kit/combo: a venda baixa o estoque dos componentes, não do kit.</summary>
+    public bool IsKit { get; set; }
+    // Dados fiscais (vazio = usa o padrão do perfil fiscal da loja).
+    public string? Ncm { get; set; }
+    public string? Cest { get; set; }
+    public string? Cfop { get; set; }
+    public int FiscalOrigin { get; set; }
+    public string? IcmsCst { get; set; }
+    public string? IbsCbsCst { get; set; }
+    public string? IbsCbsClass { get; set; }
     public string? ImageKey { get; set; }
     public string? ImageContentType { get; set; }
     public DateTimeOffset? ImageUpdatedAt { get; set; }
@@ -61,6 +75,11 @@ public enum SaleStatus { Completed = 1, Cancelled = 2 }
 
 public class Sale : TenantEntity
 {
+    public long PromotionDiscountCents { get; set; }
+    public string? CouponCode { get; set; }
+    public Guid? QuoteId { get; set; }
+    /// <summary>Quem autorizou o desconto no total (quando houve).</summary>
+    public Guid? DiscountAuthorizedByUserId { get; set; }
     public Guid StoreId { get; set; }
     public Guid? DeviceId { get; set; }
     public Guid CashSessionId { get; set; }
@@ -103,7 +122,7 @@ public class SaleItem : TenantEntity
     public long TotalCents { get; set; }
 }
 
-public enum PaymentMethod { Cash = 1, DebitCard = 2, CreditCard = 3, Pix = 4, Other = 9 }
+public enum PaymentMethod { Cash = 1, DebitCard = 2, CreditCard = 3, Pix = 4, StoreCredit = 5, Other = 9 }
 
 public class SalePayment : TenantEntity
 {
@@ -113,6 +132,23 @@ public class SalePayment : TenantEntity
 }
 
 public enum CashSessionStatus { Open = 1, Closed = 2 }
+
+/// <summary>
+/// Autorização de desconto no total da venda, dada pelo proprietário (ou quem tiver sales.discount.authorize)
+/// digitando a própria senha no PDV. Vale para UMA venda, até o valor autorizado, por tempo limitado.
+/// </summary>
+public class DiscountAuthorization : TenantEntity
+{
+    public Guid ApproverUserId { get; set; }
+    public Guid RequestedByUserId { get; set; }
+    public long MaxDiscountCents { get; set; }
+    public long SubtotalCents { get; set; }
+    public string Reason { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAt { get; set; }
+    public Guid? UsedBySaleId { get; set; }
+    public DateTimeOffset? UsedAt { get; set; }
+}
 
 public class CashSession : TenantEntity
 {
@@ -130,7 +166,7 @@ public class CashSession : TenantEntity
     public Guid? ReviewedByUserId { get; set; }
 }
 
-public enum CashMovementType { Opening = 1, Supply = 2, Withdrawal = 3, CashSale = 4, SaleCancellation = 5 }
+public enum CashMovementType { Opening = 1, Supply = 2, Withdrawal = 3, CashSale = 4, SaleCancellation = 5, ReceivableReceipt = 6 }
 
 public class CashMovement : TenantEntity
 {
@@ -201,6 +237,30 @@ public class FiscalDocument : TenantEntity
     public int Attempts { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? AuthorizedAt { get; set; }
+    /// <summary>Referência única enviada ao provedor (idempotência: reenviar não gera nota duplicada).</summary>
+    public string? ProviderRef { get; set; }
+    public int? Number { get; set; }
+    public int? Series { get; set; }
+    public int Environment { get; set; } = 2;
+    public string? DanfeUrl { get; set; }
+    public string? XmlUrl { get; set; }
+    public string? QrCodeUrl { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+    public string? CancelReason { get; set; }
+}
+
+/// <summary>Inutilização de numeração de NFC-e (faixa que não será usada), registrada junto ao provedor/SEFAZ.</summary>
+public class FiscalNumberVoid : TenantEntity
+{
+    public int Series { get; set; }
+    public int FirstNumber { get; set; }
+    public int LastNumber { get; set; }
+    public string Reason { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string? Protocol { get; set; }
+    public string? Message { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class FiscalEvent : TenantEntity

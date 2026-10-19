@@ -13,6 +13,7 @@ namespace Comercial.Api.Endpoints;
 public sealed record SuspendRequest(string ConfirmTenantCode, string Reason);
 public sealed record ConfirmRequest(string ConfirmTenantCode);
 public sealed record CreateInvoiceRequest(int? DueInDays);
+public sealed record TestEmailRequest(string To);
 
 public static class AdminEndpoints
 {
@@ -102,19 +103,66 @@ public static class AdminEndpoints
             await db.SaveChangesAsync();
             return Results.NoContent();
         }).AdminOnly().Reauth();
-        g.MapPost("/tenants/{id:guid}/invoices", async (Guid id, CreateInvoiceRequest r, AppDbContext db, AuditService audit) =>
+        // Fatura do período atual (não duplica: se já existir, devolve a mesma).
+        g.MapPost("/tenants/{id:guid}/invoices", async (Guid id, CreateInvoiceRequest r, BillingService b) => Results.Ok(await b.EnsureCurrentInvoiceAsync(id, r.DueInDays ?? 5)))
+            .AdminOnly();
+
+        // ---------- Faturamento (todas as empresas) ----------
+        g.MapGet("/invoices/upcoming", async (BillingService b, int? days) => Results.Ok(await b.UpcomingAsync(days ?? 3)));
+        g.MapPost("/billing/run", async (BillingService b) => Results.Ok(new { created = await b.GenerateDueInvoicesAsync(), reminders = await b.SendRemindersAsync() }))
+            .AdminOnly();
+        g.MapPost("/invoices/{invoiceId:guid}/mark-paid", async (Guid invoiceId, SuspendRequest r, BillingService b) =>
+            Results.Ok(await b.MarkPaidManuallyAsync(invoiceId, r.ConfirmTenantCode, r.Reason))).AdminOnly().Reauth();
+
+        // ---------- Versão do caixa (atualização automática) ----------
+        g.MapGet("/settings/desktop-release", async (PlatformSettingsService s) => Results.Ok(await s.DesktopReleaseAsync())).AdminOnly();
+        g.MapPut("/settings/desktop-release", async (DesktopReleaseRequest r, PlatformSettingsService s, IHostEnvironment env) =>
         {
-            var sub = await db.Subscriptions.IgnoreQueryFilters().Where(s => s.TenantId == id && s.Status != SubscriptionStatus.Cancelled).OrderByDescending(s => s.StartedAt).FirstOrDefaultAsync()
-                      ?? throw new DomainException("no_subscription", "Empresa sem assinatura.", 404);
-            var inv = new Invoice
-            {
-                TenantId = id, SubscriptionId = sub.Id, AmountCents = sub.PriceCents, DueAt = DateTimeOffset.UtcNow.AddDays(r.DueInDays ?? 5),
-                PeriodStart = sub.CurrentPeriodEnd, PeriodEnd = sub.CurrentPeriodEnd.AddMonths((int)sub.Period),
-            };
-            db.Invoices.Add(inv);
-            audit.Add("invoice.created", id, nameof(Invoice), inv.Id, new { inv.AmountCents, inv.DueAt });
+            await s.SaveDesktopReleaseAsync(r, env.IsDevelopment() || env.EnvironmentName == "Testing");
+            return Results.Ok(await s.DesktopReleaseAsync());
+        }).AdminOnly().Reauth();
+
+        // ---------- Cadastro com teste grátis ----------
+        g.MapGet("/settings/signup", async (PlatformSettingsService s) => Results.Ok(await s.SignupAsync())).AdminOnly();
+        g.MapPut("/settings/signup", async (SignupSettingsRequest r, PlatformSettingsService s) => { await s.SaveSignupAsync(r); return Results.Ok(await s.SignupAsync()); }).AdminOnly().Reauth();
+
+        // ---------- E-mail (SMTP da plataforma) ----------
+        g.MapGet("/settings/smtp", async (PlatformSettingsService s) => Results.Ok(await s.SmtpViewAsync())).AdminOnly();
+        g.MapPut("/settings/smtp", async (SmtpSettingsRequest r, PlatformSettingsService s) => { await s.SaveSmtpAsync(r); return Results.Ok(await s.SmtpViewAsync()); })
+            .AdminOnly().Reauth();
+        g.MapPost("/settings/smtp/test", async (TestEmailRequest r, EmailService e, EmailSender sender, AppDbContext db) =>
+        {
+            if (!System.Net.Mail.MailAddress.TryCreate(r.To, out _)) throw new DomainException("invalid_email", "E-mail inválido.");
+            e.Simple(null, r.To, "Teste de e-mail do Sistema Comercial", "Teste de e-mail", "Se você recebeu esta mensagem, o envio de e-mails está funcionando.", "test");
             await db.SaveChangesAsync();
-            return Results.Ok(inv);
+            await sender.SendPendingAsync();
+            var last = await db.EmailMessages.AsNoTracking().Where(m => m.Kind == "test").OrderByDescending(m => m.CreatedAt).FirstAsync();
+            return Results.Ok(new { ok = last.Status == EmailStatus.Sent, message = last.Status == EmailStatus.Sent ? "E-mail enviado." : "Falhou: " + last.LastError });
+        }).AdminOnly();
+        g.MapGet("/emails", async (AppDbContext db) => Results.Ok(await db.EmailMessages.AsNoTracking().OrderByDescending(m => m.CreatedAt).Take(100)
+            .Select(m => new { m.Id, m.To, m.Subject, m.Kind, m.Status, m.Attempts, m.LastError, m.CreatedAt, m.SentAt }).ToListAsync())).AdminOnly();
+
+        // ---------- NFS-e das mensalidades (exige CNPJ) ----------
+        g.MapGet("/settings/nfse", async (PlatformSettingsService s) => Results.Ok(await s.NfseViewAsync())).AdminOnly();
+        g.MapPut("/settings/nfse", async (NfseSettingsRequest r, PlatformSettingsService s) => { await s.SaveNfseAsync(r); return Results.Ok(await s.NfseViewAsync()); })
+            .AdminOnly().Reauth();
+        g.MapGet("/nfse", async (AppDbContext db) => Results.Ok(await db.NfseDocuments.AsNoTracking().OrderByDescending(x => x.CreatedAt).Take(100).ToListAsync())).AdminOnly();
+        g.MapPost("/nfse/run", async (NfseService s, CancellationToken ct) => Results.Ok(new { processed = await s.ProcessAsync(ct) })).AdminOnly();
+
+        // ---------- Mercado Pago (credenciais da plataforma) ----------
+        g.MapGet("/settings/mercadopago", async (PlatformSettingsService s, HttpRequest req) =>
+            Results.Ok(await s.MercadoPagoViewAsync($"{req.Scheme}://{req.Host}"))).AdminOnly();
+        g.MapPut("/settings/mercadopago", async (MercadoPagoSettingsRequest r, PlatformSettingsService s, HttpRequest req) =>
+        {
+            await s.SaveMercadoPagoAsync(r);
+            return Results.Ok(await s.MercadoPagoViewAsync($"{req.Scheme}://{req.Host}"));
+        }).AdminOnly().Reauth();
+        g.MapPost("/settings/mercadopago/test", async (PlatformSettingsService s, IMercadoPagoClient mp, CancellationToken ct) =>
+        {
+            var cfg = await s.MercadoPagoAsync();
+            if (cfg is null) return Results.Ok(new { ok = false, message = "Access Token não configurado." });
+            var (ok, message) = await mp.CheckAsync(cfg.AccessToken, ct);
+            return Results.Ok(new { ok, message });
         }).AdminOnly();
         g.MapGet("/tenants/{id:guid}/audit", async (Guid id, AppDbContext db, int? take) =>
             Results.Ok(await db.AuditLogs.AsNoTracking().Where(a => a.TenantId == id).OrderByDescending(a => a.Id).Take(Math.Clamp(take ?? 200, 1, 1000)).ToListAsync()));
@@ -182,6 +230,13 @@ public static class AdminEndpoints
             var r = await s.ReadAssetAsync(id, assetId);
             return r is null ? Results.NotFound() : Results.File(r.Value.Bytes, r.Value.Asset.ContentType);
         });
+
+        // ---------- Armazenamento de arquivos por empresa (pasta + API do Google) ----------
+        g.MapGet("/tenants/{id:guid}/storage", async (Guid id, TenantStorageService s) => Results.Ok(await s.GetAsync(id)));
+        g.MapPut("/tenants/{id:guid}/storage", async (Guid id, StorageSettingsRequest r, TenantStorageService s) => Results.Ok(await s.SaveAsync(id, r)))
+            .AdminOnly().Reauth();
+        g.MapPost("/tenants/{id:guid}/storage/test", async (Guid id, TenantStorageService s, CancellationToken ct) => Results.Ok(await s.TestAsync(id, ct)))
+            .AdminOnly();
 
         // ---------- Diagnóstico e auditoria ----------
         g.MapGet("/diagnostics", async (AppDbContext db) =>

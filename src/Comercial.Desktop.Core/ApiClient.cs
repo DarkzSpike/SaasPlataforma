@@ -21,9 +21,10 @@ public sealed class ApiClient(HttpClient http)
     private string? _access;
     public string? RefreshToken { get; private set; }
 
-    public async Task LoginAsync(string tenantCode, string email, string password, Guid? deviceId)
+    public async Task LoginAsync(string tenantCode, string email, string password, Guid? deviceId, string? totpCode = null)
     {
-        var t = await Send<TokenResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(tenantCode, email, password, deviceId), auth: false);
+        var t = await Send<TokenResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(tenantCode, email, password, deviceId,
+            string.IsNullOrWhiteSpace(totpCode) ? null : totpCode.Trim()), auth: false);
         _access = t.AccessToken; RefreshToken = t.RefreshToken;
     }
 
@@ -40,6 +41,23 @@ public sealed class ApiClient(HttpClient http)
     public Task<JsonElement> GetAsync(string path) => Send<JsonElement>(HttpMethod.Get, path);
     public Task<JsonElement> PostAsync(string path, object body) => Send<JsonElement>(HttpMethod.Post, path, body);
     public Task<JsonElement> PutAsync(string path, object body) => Send<JsonElement>(HttpMethod.Put, path, body);
+
+    /// <summary>Chamada sem login (ex.: "esqueci minha senha"); ignora o corpo da resposta.</summary>
+    public async Task PostAnonymousAsync(string path, object body)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) };
+        using var res = await http.SendAsync(req);
+        if (!res.IsSuccessStatusCode) throw new ApiException((int)res.StatusCode, await CodeOf(res));
+    }
+
+    /// <summary>POST sem login que devolve JSON (cadastro com teste grátis).</summary>
+    public async Task<JsonElement> PostAnonymousJsonAsync(string path, object body)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) };
+        using var res = await http.SendAsync(req);
+        if (!res.IsSuccessStatusCode) throw new ApiException((int)res.StatusCode, await CodeOf(res));
+        return await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+    }
 
     /// <summary>Envia um arquivo (multipart, campo "file"). O servidor valida o conteúdo real.</summary>
     public async Task<JsonElement> UploadAsync(string path, byte[] bytes, string fileName, string contentType)

@@ -1,0 +1,16 @@
+# API (ASP.NET Core). Build a partir da raiz do repositório:
+#   docker build -f deploy/docker/Dockerfile.api .
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY . .
+RUN dotnet publish src/Comercial.Api -c Release -o /out -p:DebugType=none
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /out .
+# /data guarda as chaves do DataProtection (segredos criptografados) e as fotos: precisa de volume e de BACKUP.
+RUN mkdir -p /data/keys /data/storage && chown -R $APP_UID /data
+USER $APP_UID
+ENV ASPNETCORE_HTTP_PORTS=8080
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "Comercial.Api.dll"]

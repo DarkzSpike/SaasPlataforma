@@ -1,21 +1,21 @@
 # Relatório final — fundação da plataforma SaaS de gestão comercial
 
-Data: 18/10/2026. Ambiente: Windows 10, .NET SDK 10.0.402, Node 24, PostgreSQL 18.6 (instalado via winget na etapa 2). **Sem** Flutter ou Docker.
+Data: 18/10/2026 (atualizado em 19/10/2026 com a rodada "comparação com o mercado", seção 16). Ambiente: Windows 10, .NET SDK 10.0.402, Node 24, PostgreSQL 18.6 (instalado via winget na etapa 2). **Sem** Flutter ou Docker.
 
 ## 1. Resumo honesto
 
 | | Situação |
 |---|---|
-| Testes automatizados — SQLite | **100 aprovados**, 4 ignorados (específicos de PostgreSQL) |
-| Testes automatizados — PostgreSQL 18 + RLS | **103 aprovados**, 1 ignorado (específico de SQLite) — `dev/test-pg.ps1` |
+| Testes automatizados — SQLite | **173 aprovados**, 4 ignorados (específicos de PostgreSQL) — 19/10/2026 |
+| Testes automatizados — PostgreSQL 18 + RLS | **176 aprovados**, 1 ignorado (específico de SQLite) — `dev/test-pg.ps1` — 19/10/2026 |
 | Caminho de deploy PostgreSQL | `001_inicial.sql` + `002_seguranca_rls.sql` via psql → API como `app_comercial` → dados reais → `backup.ps1` → `restore-test.ps1`: **OK** (`dev/pg-e2e.ps1`) |
 | Compilação | solução inteira em Release com avisos tratados como erro: **0 avisos, 0 erros** |
 | Dependências vulneráveis (NuGet) | **nenhuma** (`dotnet list package --vulnerable --include-transitive`) |
 | Painel web | testado manualmente no navegador: login com MFA, criação de empresa, módulos, publicação de identidade visual |
-| App Windows | compila; 19 telas renderizadas e conferidas por captura (`--snapshot`); fluxos de clique **não** automatizados (a lógica offline e a API por trás são testadas) |
+| App Windows | compila; 27 telas renderizadas e conferidas por captura (`--snapshot`); fluxos de clique **não** automatizados (a lógica offline e a API por trás são testadas) |
 | App Flutter | **código escrito, não compilado** (sem SDK) |
-| Fiscal (NFC-e/NF-e) | **não integrado à SEFAZ**: só o ciclo de estados; o provedor padrão nunca autoriza |
-| Pagamentos | webhook genérico assinado (HMAC) e idempotente; **nenhum provedor real** conectado |
+| Fiscal (NFC-e/NFS-e) | integração com Focus NFe **escrita e testada só com simulador**; desligada enquanto não houver CNPJ |
+| Pagamentos | Mercado Pago (mensalidades + PIX do caixa) **testado só com simulador**; falta 1 pagamento real em credenciais TEST- |
 
 Não é um sistema pronto para produção. É a fundação segura (fases 1–5, 7–9 em grande parte) com os
 controles críticos implementados e verificados por testes. O checklist bloqueante está em [OPERACAO.md](OPERACAO.md).
@@ -214,3 +214,44 @@ Painel: `dev/run-api.ps1` + `dev/run-admin.ps1`, abrir http://localhost:5180, c�
 5. Compilar e testar o app Flutter; flavors para ícone/nome por cliente quando vendido.
 6. Instalador Windows assinado com atualização e reversão; periféricos (impressora térmica e gaveta).
 7. Próximos módulos por prioridade comercial (sugestão: Fornecedores → Compras; CRM → Fidelidade; Financeiro).
+
+## 16. Rodada "comparação com o mercado" (19/10/2026)
+
+Operando **no CPF**: tudo que exige CNPJ foi construído mas fica **desligado** (NFC-e, NFS-e) até a empresa existir.
+"Simulado" = testado com um provedor falso que imita a API real; **não** foi chamado o serviço de verdade.
+
+| # | Item | Situação | Testes automatizados | Ainda não verificado de verdade |
+|---|---|---|---|---|
+| 1 | E-mail do sistema (SMTP) com fila e novas tentativas | feito | `EmailTests` (4) | envio por um SMTP real (Gmail/Brevo) |
+| 2 | "Esqueci minha senha" por código no e-mail | feito | `EmailTests` | — |
+| 3 | Pagamento dividido em várias formas | feito | `PaymentSplitTests` (2) | — |
+| 4 | Suprimento (entrada de troco) | feito | coberto pelos testes de caixa | — |
+| 5 | PIX com QR Code no caixa (conta MP da loja) | feito | `StorePixTests` (1, simulado) | pagamento PIX real |
+| 6 | Reforma tributária (IBS/CBS) nos produtos e notas | feito | `FiscalTests` (4) | layout final na homologação da SEFAZ |
+| 7 | NFC-e (Focus NFe) com cancelamento e inutilização | feito, **desligado** | `FiscalTests` (simulado) | exige CNPJ + certificado A1 |
+| 8 | NFS-e das mensalidades | feito, **desligado** | `FiscalTests` (simulado) | exige CNPJ |
+| 9 | Impressora térmica ESC/POS + gaveta | feito | `HardwareTests` (bytes gerados) | impressora/gaveta física |
+| 10 | Balança (etiqueta EAN-13 e serial) | feito | `HardwareTests` (leitura de etiqueta e protocolo) | balança física na porta serial |
+| 11 | Etiquetas de gôndola (ZPL) | feito | `HardwareTests` | impressora de etiquetas física |
+| 12 | Grade (tamanho/cor) | feito | `CatalogExtrasTests` (7) | — |
+| 13 | Kits (baixa os componentes) | feito | `CatalogExtrasTests` | — |
+| 14 | Vários códigos de barras por produto | feito | `CatalogExtrasTests` | — |
+| 15 | Promoções e cupons (mesma regra no servidor e no caixa) | feito | `CatalogExtrasTests` | — |
+| 16 | Fiado/crediário com limite e recebimento | feito | `CatalogExtrasTests` | — |
+| 17 | Orçamentos convertidos em venda | feito | `CatalogExtrasTests` | — |
+| 18 | Importar NF-e de compra (XML) | feito | `StockImportTests` (4) | XML de fornecedor real variado |
+| 19 | Importar produtos por planilha (CSV) | feito | `StockImportTests` | — |
+| 20 | Lote e validade (FEFO) + alertas de vencimento | feito | `StockImportTests` | — |
+| 21 | Transferência entre lojas | feito | `StockImportTests` | — |
+| 22 | Relatórios: curva ABC, giro, vendedores/comissão, horários, DRE | feito | `ReportsTests` (2) | — |
+| 23 | Pacote do contador (ZIP) | feito | `ReportsTests` | validação com um contador |
+| 24 | Cadastro com teste grátis (código por e-mail) | feito | `OnboardingTests` (3) | — |
+| 25 | Verificação em duas etapas para usuários das lojas | feito | `OnboardingTests` | — |
+| 26 | Banco local do caixa criptografado (SQLCipher + chave DPAPI) | feito | `LocalEncryptionTests` (3) | conferido também no caixa real: banco antigo convertido |
+| 27 | Atualização automática assinada + instalador | feito | `UpdateTests` (2) | **instalador não compilado** (Inno Setup não instalado); sem assinatura Authenticode |
+| 28 | Deploy de produção (Docker + HTTPS + backup) | escrito | — | **não executado** (sem Docker/servidor); ver [DEPLOY.md](DEPLOY.md) |
+| 29 | Ajuda dentro do caixa (F1) | feito | captura de tela | — |
+
+Outros pontos verificados nesta rodada: compilação Release com avisos como erro (0/0), nenhum pacote vulnerável,
+SQL de deploy regenerado (`001_inicial.sql`) e aplicado no PostgreSQL de desenvolvimento, todas as tabelas por empresa
+no RLS, 27 telas do caixa renderizadas e conferidas. O app Flutter continua **não compilado**.

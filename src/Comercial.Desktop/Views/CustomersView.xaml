@@ -42,6 +42,13 @@
                         <TextBlock DockPanel.Dock="Top" Text="{Binding DetailInfo}" Style="{StaticResource Muted}" Margin="0,4,0,6"/>
                         <TextBlock DockPanel.Dock="Top" Text="{Binding PointsText}" Foreground="{DynamicResource WarnBrush}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"
                                    Visibility="{Binding PointsText, Converter={StaticResource Vis}}"/>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="{Binding CreditText, Converter={StaticResource Vis}}">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Style="{StaticResource DarkButton}" Content="Limite" Height="34" Padding="12,0" Margin="0,0,8,0" Command="{Binding LimitCommand}"/>
+                                <Button Style="{StaticResource PrimaryButton}" Content="Receber fiado" Height="34" Padding="12,0" Command="{Binding ReceiveCreditCommand}"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding CreditText}" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        </DockPanel>
                         <UniformGrid DockPanel.Dock="Bottom" Rows="1" Margin="0,14,0,0">
                             <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE70F;" Content="Editar" Margin="0,0,6,0" Command="{Binding EditCommand}"/>
                             <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE896;" Content="Exportar dados (LGPD)" Margin="3,0" Command="{Binding ExportCommand}"/>

@@ -1,5 +1,6 @@
 using Comercial.Api.Security;
 using Comercial.Domain;
+using Comercial.Domain.Modules;
 using Comercial.Domain.Security;
 using Comercial.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -10,14 +11,21 @@ public sealed record OpenCashRequest(Guid StoreId, long OpeningCents, Guid? Devi
 public sealed record CashMovementRequest(long AmountCents, string Reason);
 public sealed record CloseCashRequest(long DeclaredCashCents, string? Justification);
 
-public sealed class CashService(AppDbContext db, RequestActor actor, AuditService audit, StockService stock, ScopedLookup lookup, NotificationService notifications)
+public sealed class CashService(AppDbContext db, RequestActor actor, AuditService audit, StockService stock, ScopedLookup lookup, NotificationService notifications,
+    OperatingService operating, FeatureAuthorization features)
 {
+    private static readonly System.Globalization.CultureInfo Pt = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+    private static string Brl(long cents) => (cents / 100m).ToString("C", Pt);
+
     public async Task<CashSession> OpenAsync(OpenCashRequest r)
     {
         if (r.OpeningCents < 0 || r.OpeningCents > 100_000_00) throw new DomainException("invalid_amount", "Valor inicial inválido.");
         await stock.EnsureStoreAccessAsync(r.StoreId);
         if (await db.CashSessions.AnyAsync(c => c.OperatorUserId == actor.UserId && c.Status == CashSessionStatus.Open))
             throw new DomainException("cash_already_open", "Já existe um caixa aberto para este operador.", 409);
+        // Regra: com o módulo de horários contratado, o caixa só abre com a loja aberta.
+        if ((await features.ModulesAsync()).Contains(ModuleKeys.StoreHours) && (await operating.StatusAsync(r.StoreId)).State != "open")
+            throw new DomainException("store_closed", "Abra a loja antes de abrir o caixa.", 409);
 
         var s = new CashSession { StoreId = r.StoreId, DeviceId = r.DeviceId ?? actor.DeviceId, OperatorUserId = actor.UserId!.Value, OpeningCents = r.OpeningCents };
         db.CashSessions.Add(s);
@@ -42,6 +50,17 @@ public sealed class CashService(AppDbContext db, RequestActor actor, AuditServic
         db.CashMovements.Add(m);
         audit.Add(type == CashMovementType.Withdrawal ? "cash.withdrawal" : "cash.supply", actor.TenantId, nameof(CashSession), s.Id, new { r.AmountCents, r.Reason });
         await db.SaveChangesAsync();
+
+        // Toda sangria avisa o dono (app + push quando configurado).
+        if (type == CashMovementType.Withdrawal)
+        {
+            var who = await db.Users.AsNoTracking().Where(u => u.Id == actor.UserId).Select(u => u.DisplayName).FirstOrDefaultAsync() ?? "operador";
+            var store = await db.Stores.AsNoTracking().Where(x => x.Id == s.StoreId).Select(x => x.Name).FirstOrDefaultAsync() ?? "";
+            var left = await ExpectedCashAsync(s.Id);
+            await notifications.CreateAsync(actor.TenantId, "cash.withdrawal", $"Sangria: {Brl(r.AmountCents)} retirado do caixa",
+                $"{who} retirou {Brl(r.AmountCents)} do caixa ({store}) para sangria. Motivo: {r.Reason.Trim()}. Fica na gaveta: {Brl(left)}.",
+                new { cashSessionId = s.Id, amountCents = r.AmountCents, remainingCents = left, movementId = m.Id });
+        }
         return m;
     }
 
@@ -70,7 +89,7 @@ public sealed class CashService(AppDbContext db, RequestActor actor, AuditServic
         // Quebra de caixa (faltou dinheiro): avisa o dono no app (push quando configurado).
         if (diff < 0)
         {
-            var pt = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+            var pt = Pt;
             var who = await db.Users.AsNoTracking().Where(u => u.Id == s.OperatorUserId).Select(u => u.DisplayName).FirstOrDefaultAsync() ?? "operador";
             var store = await db.Stores.AsNoTracking().Where(x => x.Id == s.StoreId).Select(x => x.Name).FirstOrDefaultAsync() ?? "";
             await notifications.CreateAsync(actor.TenantId, "cash.shortage", $"Quebra de caixa: {(-diff / 100m).ToString("C", pt)}",

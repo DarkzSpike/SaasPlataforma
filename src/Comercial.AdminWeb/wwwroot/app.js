@@ -2,7 +2,7 @@
 // Painel do desenvolvedor. Regras: token só em memória; nada de innerHTML com dados;
 // toda operação é validada e auditada no servidor — esta interface apenas a solicita.
 
-const state = { api: '', token: null, me: null, view: 'tenants', tenantId: null, tenant: null, tab: 'resumo' };
+const state = { api: '', token: null, me: null, view: 'tenants', tenantId: null, tenant: null, tab: 'resumo', support: null, invoiceDays: 3 };
 
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
@@ -45,6 +45,12 @@ async function call(method, path, body, headers = {}) {
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) { const e = new Error((data && data.title) || ('HTTP ' + res.status)); e.code = data && data.code; throw e; }
   return data;
+}
+
+// Chamada à API da loja dentro de uma sessão de suporte (o servidor confere prazo, escopo e registra tudo).
+function callStore(method, path, body) {
+  if (!state.support) throw new Error('Sessão de suporte não iniciada.');
+  return call(method, path, body, { 'X-Support-Session': state.support.id });
 }
 
 async function blobUrl(path) {
@@ -110,13 +116,14 @@ async function tenantsView() {
     const list = await call('GET', '/admin/v1/tenants?q=' + encodeURIComponent(q.value));
     tbody.replaceChildren(...list.map(t => h('tr', { class: 'clickable', onclick: () => openTenant(t.id) },
       h('td', {}, h('strong', {}, t.tradeName), h('div', { class: 'muted' }, t.code)),
-      h('td', {}, t.plan || '—'), h('td', {}, licensePill(t.license)), h('td', {}, t.status), h('td', {}, dt(t.periodEnd)))));
+      h('td', {}, t.plan || '—'), h('td', {}, licensePill(t.license)), h('td', {}, t.status), h('td', {}, dt(t.periodEnd)),
+      h('td', {}, h('button', { class: 'btn secondary', onclick: e => { e.stopPropagation(); openTenant(t.id, 'loja'); } }, 'Acessar loja')))));
   };
   q.addEventListener('input', () => { clearTimeout(q._t); q._t = setTimeout(load, 250); });
   await load();
   return [
     h('div', { class: 'card' }, h('div', { class: 'row' }, q, h('button', { class: 'btn', onclick: () => { state.view = 'new'; render(); } }, 'Nova empresa'))),
-    h('div', { class: 'card' }, h('table', {}, h('thead', {}, h('tr', {}, ['Empresa', 'Plano', 'Licença', 'Situação', 'Fim do período'].map(x => h('th', {}, x)))), tbody)),
+    h('div', { class: 'card' }, h('table', {}, h('thead', {}, h('tr', {}, ['Empresa', 'Plano', 'Licença', 'Situação', 'Fim do período', ''].map(x => h('th', {}, x)))), tbody)),
   ];
 }
 
@@ -143,16 +150,19 @@ async function newTenantView() {
       h('button', { class: 'btn secondary', onclick: () => { state.view = 'tenants'; render(); } }, 'Cancelar')), err);
 }
 
-async function openTenant(id) { state.tenantId = id; state.view = 'tenant'; state.tab = 'resumo'; render(); }
+async function openTenant(id, tab) {
+  if (state.support && state.support.tenantId !== id) state.support = null; // sessão de suporte é sempre de UMA empresa
+  state.tenantId = id; state.view = 'tenant'; state.tab = tab || 'resumo'; render();
+}
 
 async function tenantView() {
   const d = await call('GET', `/admin/v1/tenants/${state.tenantId}`);
   state.tenant = d.tenant;
-  const tabs = { resumo: 'Resumo', modulos: 'Módulos', suporte: 'Suporte', identidade: 'Identidade visual', auditoria: 'Auditoria' };
+  const tabs = { resumo: 'Resumo', loja: 'Acessar loja (suporte)', modulos: 'Módulos', armazenamento: 'Armazenamento', suporte: 'Diagnóstico', identidade: 'Identidade visual', auditoria: 'Auditoria' };
   const content = h('div');
   const tabBar = h('div', { class: 'row', style: 'margin-bottom:12px' }, Object.entries(tabs).map(([t, label]) =>
     h('button', { class: 'btn ' + (state.tab === t ? '' : 'secondary'), onclick: () => { state.tab = t; render(); } }, label)));
-  const views = { resumo: tenantSummary, modulos: tenantModules, suporte: tenantSupport, identidade: brandingEditor, auditoria: tenantAudit };
+  const views = { resumo: tenantSummary, loja: storeWorkspace, modulos: tenantModules, armazenamento: tenantStorage, suporte: tenantSupport, identidade: brandingEditor, auditoria: tenantAudit };
   content.append(...[].concat(await views[state.tab](d)));
   return [tabBar, content];
 }
@@ -171,6 +181,7 @@ function tenantSummary(d) {
         h('p', {}, 'Licença: ', licensePill(d.license), ' • fim do período: ', dt(s && s.currentPeriodEnd)),
         h('p', { class: 'muted' }, `Limites: ${s ? s.maxUsers : 0} usuários, ${s ? s.maxDevices : 0} terminais, ${s ? s.maxStores : 0} lojas • ${d.activeUsers} usuários ativos`),
         h('div', { class: 'row' },
+          h('button', { class: 'btn', onclick: () => { state.tab = 'loja'; render(); } }, 'Acessar loja (suporte)'),
           h('button', { class: 'btn secondary', onclick: async () => { await call('POST', `/admin/v1/tenants/${t.id}/invoices`, { dueInDays: 5 }); render(); } }, 'Gerar fatura'),
           t.status === 1
             ? h('button', { class: 'btn danger', onclick: () => critical(`/admin/v1/tenants/${t.id}/suspend`, 'Suspender empresa', true) }, 'Suspender')
@@ -211,6 +222,71 @@ async function tenantModules(d) {
         h('td', {}, m.status === 0 ? h('span', { class: 'muted' }, 'não implementado')
           : h('button', { class: 'btn ' + (on ? 'secondary' : ''), onclick: () => toggle(m, !on) }, on ? 'Desativar' : 'Ativar')));
     })))));
+}
+
+// ---------- Armazenamento por empresa (pasta do Google Drive + credencial da API) ----------
+async function tenantStorage(d) {
+  const t = d.tenant;
+  const base = `/admin/v1/tenants/${t.id}/storage`;
+  const s = await call('GET', base);
+  const msg = h('div', { class: 'muted' });
+  const err = h('div', { class: 'error' });
+  const provider = h('select', {}, h('option', { value: 'local' }, 'Servidor (padrão)'), h('option', { value: 'gdrive' }, 'Google Drive da empresa'));
+  provider.value = s.provider;
+  const folder = h('input', { placeholder: 'Cole o link da pasta (https://drive.google.com/drive/folders/...) ou o ID', value: s.driveFolderId || '' });
+  const impersonate = h('input', { type: 'email', placeholder: 'Opcional — só com delegação de domínio do Google Workspace', value: s.impersonateUser || '' });
+  const creds = h('textarea', { rows: '5', placeholder: s.hasCredentials ? 'Já existe uma credencial salva. Cole um novo JSON somente para substituí-la.' : 'Cole aqui o conteúdo do arquivo JSON da conta de serviço', autocomplete: 'off', spellcheck: 'false' });
+  const file = h('input', { type: 'file', accept: 'application/json,.json', onchange: async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (f.size > 20000) { err.textContent = 'Arquivo grande demais para uma credencial.'; return; }
+    creds.value = await f.text(); msg.textContent = `Arquivo "${f.name}" carregado (ainda não salvo).`;
+  } });
+  const remove = h('input', { type: 'checkbox' });
+  const gdriveBox = h('div', {},
+    h('label', {}, 'Pasta do Google Drive onde os arquivos desta empresa serão salvos'), folder,
+    h('label', {}, 'Credencial da API do Google (JSON da conta de serviço)'), file, creds,
+    s.hasCredentials ? h('p', { class: 'muted' }, 'Credencial salva: ', h('strong', {}, s.credentialsClientEmail), ' — compartilhe a pasta com este e-mail como Editor.') : null,
+    s.hasCredentials ? h('label', { class: 'row' }, remove, ' Remover a credencial salva') : null,
+    h('label', {}, 'Usuário para delegação (opcional)'), impersonate);
+  const sync = () => { gdriveBox.style.display = provider.value === 'gdrive' ? '' : 'none'; };
+  provider.addEventListener('change', sync); sync();
+
+  const status = s.lastTestAt
+    ? h('p', {}, h('span', { class: 'pill ' + (s.lastTestOk ? 'ok' : 'bad') }, s.lastTestOk ? 'conexão ok' : 'falha'), ' ', s.lastTestMessage, h('span', { class: 'muted' }, ' • testado em ' + dt(s.lastTestAt)))
+    : h('p', { class: 'muted' }, s.version ? 'Configuração ainda não testada.' : 'Usando o armazenamento padrão do servidor.');
+
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Alterar armazenamento', text: `Os próximos arquivos de ${t.tradeName} serão salvos no destino escolhido. Arquivos já enviados continuam onde estão.`, tenantCode: t.code, totp: true });
+    if (!c) return;
+    try {
+      await call('PUT', base, { provider: provider.value, driveFolder: folder.value, impersonateUser: impersonate.value || null,
+        credentialsJson: creds.value.trim() || null, removeCredentials: remove.checked, confirmTenantCode: c.code }, { 'X-Reauth-Totp': c.totp });
+      creds.value = '';
+      render();
+    } catch (e) { err.textContent = e.message; }
+  };
+  const test = async () => {
+    err.textContent = ''; msg.textContent = 'Testando conexão...';
+    try { const r = await call('POST', base + '/test', {}); msg.textContent = (r.lastTestOk ? '✔ ' : '✖ ') + r.lastTestMessage; } catch (e) { msg.textContent = ''; err.textContent = e.message; }
+  };
+
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Armazenamento de arquivos'),
+      h('p', { class: 'muted' }, 'Define onde ficam as fotos de produtos desta empresa. A credencial é guardada criptografada e nunca é exibida de volta; o acesso aos arquivos é sempre feito pela API, que confere a empresa.'),
+      status,
+      h('label', {}, 'Onde salvar'), provider, gdriveBox,
+      h('div', { class: 'row', style: 'margin-top:12px' },
+        h('button', { class: 'btn', onclick: save }, 'Salvar'),
+        h('button', { class: 'btn secondary', onclick: test, disabled: !s.version }, 'Testar conexão')),
+      msg, err),
+    h('div', { class: 'card' }, h('h2', {}, 'Como criar a pasta e a API no Google'),
+      h('ol', {},
+        h('li', {}, 'No Google Cloud Console, crie um projeto e ative a "Google Drive API".'),
+        h('li', {}, 'Em "IAM e administrador → Contas de serviço", crie uma conta de serviço e gere uma chave do tipo JSON (baixa um arquivo).'),
+        h('li', {}, 'No Google Drive, crie a pasta da empresa (de preferência num Drive compartilhado) e compartilhe com o e-mail da conta de serviço como Editor.'),
+        h('li', {}, 'Aqui: escolha "Google Drive da empresa", cole o link da pasta, envie o arquivo JSON, salve e clique em "Testar conexão".'))),
+  ];
 }
 
 async function tenantSupport(d) {
@@ -344,14 +420,335 @@ async function brandingEditor(d) {
   ];
 }
 
+// ---------- Acesso rápido à loja (sessão de suporte) ----------
+const OPS = { 'products.write': 'cadastro de produtos', 'stock.adjust': 'ajuste de estoque', 'users.manage': 'usuários', 'devices.manage': 'terminais', 'sales.read': 'consulta de vendas' };
+const canDo = op => state.support && state.support.mode === 2 && (state.support.allowedOperations || '').split(',').includes(op) && new Date(state.support.elevatedUntil) > new Date();
+
+async function storeWorkspace(d) {
+  const t = d.tenant;
+  const active = state.support && state.support.tenantId === t.id && new Date(state.support.expiresAt) > new Date();
+  if (!active) {
+    state.support = null;
+    const reason = h('input', { placeholder: 'Motivo do atendimento (mín. 10 caracteres) — o cliente é avisado' });
+    const minutes = h('select', {}, [30, 60, 120].map(m => h('option', { value: m }, m + ' min')));
+    const totp = h('input', { placeholder: 'Código do autenticador (MFA)', inputmode: 'numeric', maxlength: '6', autocomplete: 'one-time-code' });
+    const err = h('div', { class: 'error' });
+    const start = async () => {
+      err.textContent = '';
+      try {
+        const s = await call('POST', `/admin/v1/tenants/${t.id}/support-sessions`, { reason: reason.value, durationMinutes: +minutes.value, totpCode: totp.value || null });
+        state.support = { ...s, tenantId: t.id };
+        render();
+      } catch (e) { err.textContent = e.message; }
+    };
+    return h('div', { class: 'card' }, h('h2', {}, 'Acessar a loja para suporte'),
+      h('p', { class: 'muted' }, 'Você entra na loja pelo painel, com prazo, e tudo fica na auditoria. O proprietário recebe um aviso. ',
+        'Se ele marcou em "Suporte" o que você pode alterar sem pedir, informe o MFA e a sessão já começa com essas permissões; senão, começa em modo consulta e você pode pedir liberação.'),
+      h('label', {}, 'Motivo'), reason, h('label', {}, 'Duração'), minutes, h('label', {}, 'MFA (para usar a autorização prévia do cliente)'), totp,
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: start }, 'Entrar na loja')), err);
+  }
+
+  const s = state.support;
+  const msg = h('div', { class: 'muted' });
+  const fail = e => { msg.textContent = e.code === 'support_scope' ? 'Sem permissão nesta sessão: peça liberação ao cliente (botão acima).' : e.message; };
+  const allowed = (s.allowedOperations || '').split(',').filter(Boolean);
+  const header = h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('span', { class: 'pill ' + (s.mode === 2 ? 'ok' : 'warn') }, s.mode === 2 ? 'pode alterar' : 'somente consulta'),
+      h('span', {}, s.mode === 2 ? 'Liberado: ' + allowed.map(o => OPS[o] || o).join(', ') : 'Alterações exigem aprovação do cliente.'),
+      h('span', { class: 'muted' }, ' • até ' + dt(s.expiresAt)),
+      h('div', { class: 'spacer' }),
+      h('button', { class: 'btn secondary', onclick: async () => {
+        const c = await confirmDialog({ title: 'Pedir liberação ao cliente', text: 'O proprietário recebe o pedido em Avisos/Suporte e decide. Válido por até 30 minutos.', totp: true, reason: true });
+        if (!c) return;
+        try { await call('POST', `/admin/v1/support-sessions/${s.id}/elevation-requests`, { reason: c.reason, operations: Object.keys(OPS).filter(o => o !== 'sales.read'), durationMinutes: 30, totpCode: c.totp }); msg.textContent = 'Pedido enviado ao cliente. Atualize esta tela depois que ele aprovar.'; }
+        catch (e) { msg.textContent = e.message; }
+      } }, 'Pedir liberação'),
+      h('button', { class: 'btn secondary', onclick: async () => {
+        // Recarrega o estado da sessão (ex.: cliente aprovou a liberação).
+        try { const diag = await call('GET', `/admin/v1/support-sessions/${s.id}/diagnostics`); Object.assign(state.support, diag.session, { mode: diag.session.mode, allowedOperations: diag.session.allowedOperations, elevatedUntil: diag.session.elevatedUntil }); render(); }
+        catch (e) { msg.textContent = e.message; }
+      } }, 'Atualizar'),
+      h('button', { class: 'btn danger', onclick: async () => { await call('POST', `/admin/v1/support-sessions/${s.id}/end`, {}); state.support = null; render(); } }, 'Encerrar acesso')),
+    msg);
+
+  // Produtos
+  const q = h('input', { placeholder: 'Buscar produto (nome, SKU ou código de barras)' });
+  const prodBody = h('tbody');
+  const loadProducts = async () => {
+    try {
+      const list = await callStore('GET', '/api/v1/products?q=' + encodeURIComponent(q.value));
+      prodBody.replaceChildren(...list.map(p => {
+        const name = h('input', { value: p.name, disabled: !canDo('products.write') });
+        const price = h('input', { value: (p.priceCents / 100).toFixed(2).replace('.', ','), style: 'width:110px', disabled: !canDo('products.write') });
+        const cost = h('input', { value: (p.costCents / 100).toFixed(2).replace('.', ','), style: 'width:110px', disabled: !canDo('products.write') });
+        const cents = v => Math.round(parseFloat(String(v).replace(/\./g, '').replace(',', '.')) * 100);
+        return h('tr', {}, h('td', {}, name, h('div', { class: 'muted' }, p.sku + (p.barcode ? ' • ' + p.barcode : ''))), h('td', {}, price), h('td', {}, cost),
+          h('td', {}, canDo('products.write') ? h('button', { class: 'btn secondary', onclick: async () => {
+            try {
+              await callStore('PUT', `/api/v1/products/${p.id}`, { sku: p.sku, barcode: p.barcode, name: name.value, description: p.description, unit: p.unit,
+                priceCents: cents(price.value), costCents: cents(cost.value), minStock: p.minStock, categoryId: p.categoryId, expectedVersion: p.version,
+                ncm: p.ncm, cest: p.cest, cfop: p.cfop, fiscalOrigin: p.fiscalOrigin, icmsCst: p.icmsCst, ibsCbsCst: p.ibsCbsCst, ibsCbsClass: p.ibsCbsClass });
+              msg.textContent = `Produto "${name.value}" salvo.`; await loadProducts();
+            } catch (e) { fail(e); }
+          } }, 'Salvar') : h('span', { class: 'muted' }, 'consulta')));
+      }));
+    } catch (e) { fail(e); }
+  };
+  q.addEventListener('input', () => { clearTimeout(q._t); q._t = setTimeout(loadProducts, 300); });
+
+  // Estoque
+  const store = h('select', {}, d.stores.map(x => h('option', { value: x.id }, x.name)));
+  const stockBody = h('tbody');
+  const loadStock = async () => {
+    try {
+      const rows = await callStore('GET', '/api/v1/stock/balances?storeId=' + store.value);
+      stockBody.replaceChildren(...rows.map(r => {
+        const qty = h('input', { placeholder: '+10 ou -2', style: 'width:100px', disabled: !canDo('stock.adjust') });
+        return h('tr', {}, h('td', {}, r.name, h('div', { class: 'muted' }, r.sku)), h('td', {}, String(r.quantity).replace('.', ',') + (r.low ? ' ⚠' : '')),
+          h('td', {}, canDo('stock.adjust') ? h('div', { class: 'row' }, qty, h('button', { class: 'btn secondary', onclick: async () => {
+            const n = parseFloat(qty.value.replace(',', '.'));
+            if (!n) { msg.textContent = 'Informe a quantidade a somar ou subtrair.'; return; }
+            const why = prompt('Motivo do ajuste (fica na auditoria):', 'Ajuste pelo suporte a pedido do cliente');
+            if (!why) return;
+            try { await callStore('POST', '/api/v1/stock/adjustments', { storeId: store.value, productId: r.productId, quantity: n, reason: why }); msg.textContent = 'Estoque ajustado.'; await loadStock(); }
+            catch (e) { fail(e); }
+          } }, 'Ajustar')) : h('span', { class: 'muted' }, 'consulta')));
+      }));
+    } catch (e) { fail(e); }
+  };
+  store.addEventListener('change', loadStock);
+
+  // Usuários e terminais
+  const usersBody = h('tbody'), devBody = h('tbody');
+  const loadUsers = async () => {
+    if (!canDo('users.manage')) { usersBody.replaceChildren(h('tr', {}, h('td', { class: 'muted' }, 'Requer liberação de "usuários".'))); return; }
+    try {
+      const list = await callStore('GET', '/api/v1/users');
+      usersBody.replaceChildren(...list.map(u => h('tr', {}, h('td', {}, u.displayName, h('div', { class: 'muted' }, u.email)), h('td', {}, (u.roles || []).join(', ')),
+        h('td', {}, u.isActive ? 'ativo' : 'bloqueado'),
+        h('td', {}, h('div', { class: 'row' },
+          h('button', { class: 'btn secondary', onclick: async () => { try { await callStore('POST', `/api/v1/users/${u.id}/${u.isActive ? 'block' : 'unblock'}`, {}); await loadUsers(); } catch (e) { fail(e); } } }, u.isActive ? 'Bloquear' : 'Desbloquear'),
+          h('button', { class: 'btn secondary', onclick: async () => { try { await callStore('POST', `/api/v1/users/${u.id}/revoke-sessions`, {}); msg.textContent = 'Sessões encerradas: o usuário precisa entrar de novo.'; } catch (e) { fail(e); } } }, 'Deslogar'))))));
+    } catch (e) { fail(e); }
+  };
+  const loadDevices = async () => {
+    if (!canDo('devices.manage')) { devBody.replaceChildren(h('tr', {}, h('td', { class: 'muted' }, 'Requer liberação de "terminais". Veja a lista no Resumo.'))); return; }
+    try {
+      const list = await callStore('GET', '/api/v1/devices');
+      devBody.replaceChildren(...list.map(x => h('tr', {}, h('td', {}, x.name), h('td', {}, x.platform), h('td', {}, ['', 'ativo', 'revogado'][x.status] || x.status), h('td', {}, dt(x.lastSyncAt)),
+        h('td', {}, x.status === 1 ? h('button', { class: 'btn danger', onclick: async () => { if (!confirm('Revogar este terminal? Ele precisará ser ativado de novo.')) return; try { await callStore('POST', `/api/v1/devices/${x.id}/revoke`, {}); await loadDevices(); } catch (e) { fail(e); } } }, 'Revogar') : null))));
+    } catch (e) { fail(e); }
+  };
+
+  await Promise.all([loadProducts(), loadStock(), loadUsers(), loadDevices()]);
+  return [header,
+    h('div', { class: 'card' }, h('h2', {}, 'Produtos'), q, h('table', {}, h('thead', {}, h('tr', {}, ['Produto', 'Preço (R$)', 'Custo (R$)', ''].map(x => h('th', {}, x)))), prodBody)),
+    h('div', { class: 'card' }, h('h2', {}, 'Estoque'), store, h('table', {}, h('thead', {}, h('tr', {}, ['Produto', 'Saldo', 'Ajuste'].map(x => h('th', {}, x)))), stockBody)),
+    h('div', { class: 'grid' },
+      h('div', { class: 'card' }, h('h2', {}, 'Usuários'), h('table', {}, h('tbody', {}, usersBody))),
+      h('div', { class: 'card' }, h('h2', {}, 'Terminais'), h('table', {}, h('tbody', {}, devBody)))),
+  ];
+}
+
+// ---------- Faturas de todas as empresas ----------
+async function invoicesView() {
+  const rows = await call('GET', '/admin/v1/invoices/upcoming?days=' + state.invoiceDays);
+  const total = rows.reduce((s, r) => s + r.amountCents, 0);
+  const msg = h('div', { class: 'muted' });
+  const pick = h('select', { onchange: e => { state.invoiceDays = +e.target.value; render(); } },
+    [[3, 'Vencem nos próximos 3 dias'], [7, 'Próximos 7 dias'], [30, 'Próximos 30 dias']].map(([v, l]) => h('option', { value: v }, l)));
+  pick.value = state.invoiceDays;
+  return [
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, 'Faturas a vencer e vencidas'), h('div', { class: 'spacer' }), pick,
+        h('button', { class: 'btn secondary', onclick: async () => { try { const r = await call('POST', '/admin/v1/billing/run', {}); msg.textContent = `${r.created} fatura(s) gerada(s), ${r.reminders} lembrete(s) enviado(s).`; setTimeout(render, 1200); } catch (e) { msg.textContent = e.message; } } }, 'Gerar faturas agora')),
+      h('p', { class: 'muted' }, 'As faturas são geradas automaticamente 10 dias antes do fim de cada período e o cliente recebe lembrete 3 dias antes do vencimento. ',
+        `${rows.length} fatura(s) em aberto nesta janela • total ${money(total)}.`),
+      msg),
+    h('div', { class: 'card' }, rows.length === 0 ? h('p', { class: 'muted' }, 'Nenhuma fatura em aberto nesta janela.') :
+      h('table', {}, h('thead', {}, h('tr', {}, ['Empresa', 'Valor', 'Vencimento', 'Situação', 'Pagamento iniciado', ''].map(x => h('th', {}, x)))),
+        h('tbody', {}, rows.map(r => h('tr', {},
+          h('td', {}, h('a', { href: '#', onclick: e => { e.preventDefault(); openTenant(r.tenantId); } }, r.tradeName), h('div', { class: 'muted' }, r.code)),
+          h('td', {}, money(r.amountCents)), h('td', {}, dt(r.dueAt)),
+          h('td', {}, h('span', { class: 'pill ' + (r.overdue ? 'bad' : r.daysToDue <= 3 ? 'warn' : '') }, r.overdue ? `vencida há ${-r.daysToDue} dia(s)` : r.daysToDue <= 0 ? 'vence hoje' : `vence em ${r.daysToDue} dia(s)`)),
+          h('td', {}, [r.hasPix ? 'PIX gerado' : null, r.hasCheckout ? 'link cartão/boleto' : null].filter(Boolean).join(' • ') || '—', r.reminderSentAt ? h('div', { class: 'muted' }, 'lembrete enviado') : null),
+          h('td', {}, h('button', { class: 'btn secondary', onclick: async () => {
+            const c = await confirmDialog({ title: 'Baixar fatura manualmente', text: `Use só se o pagamento entrou fora do Mercado Pago (ex.: transferência). ${r.tradeName} • ${money(r.amountCents)}.`, tenantCode: r.code, totp: true, reason: true });
+            if (!c) return;
+            try { await call('POST', `/admin/v1/invoices/${r.id}/mark-paid`, { confirmTenantCode: c.code, reason: c.reason }, { 'X-Reauth-Totp': c.totp }); render(); } catch (e) { alert(e.message); }
+          } }, 'Marcar como paga')))))))
+  ];
+}
+
+// ---------- Mercado Pago ----------
+async function paymentsView() {
+  const s = await call('GET', '/admin/v1/settings/mercadopago');
+  const msg = h('div', { class: 'muted' }), err = h('div', { class: 'error' });
+  const token = h('input', { type: 'password', autocomplete: 'off', placeholder: s.configured ? `Configurado (${s.accessTokenHint}) — preencha só para trocar` : 'APP_USR-... (produção) ou TEST-... (teste)' });
+  const pub = h('input', { value: s.publicKey || '', placeholder: 'APP_USR-... (opcional)' });
+  const secret = h('input', { type: 'password', autocomplete: 'off', placeholder: s.hasWebhookSecret ? 'Configurada — preencha só para trocar' : 'Assinatura secreta dos webhooks (painel do Mercado Pago)' });
+  const baseUrl = h('input', { value: s.notificationBaseUrl || '', placeholder: 'https://api.suaempresa.com.br (endereço público desta API)' });
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Salvar credenciais do Mercado Pago', text: 'Os pagamentos das mensalidades de todas as empresas passam a usar esta conta.', totp: true });
+    if (!c) return;
+    try {
+      await call('PUT', '/admin/v1/settings/mercadopago', { accessToken: token.value || null, publicKey: pub.value, webhookSecret: secret.value || null, notificationBaseUrl: baseUrl.value }, { 'X-Reauth-Totp': c.totp });
+      render();
+    } catch (e) { err.textContent = e.message; }
+  };
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Mercado Pago — recebimento das mensalidades'),
+      h('p', {}, 'Situação: ', h('span', { class: 'pill ' + (s.configured ? 'ok' : 'bad') }, s.configured ? (s.isTestToken ? 'configurado (modo TESTE)' : 'configurado (produção)') : 'não configurado'),
+        s.updatedAt ? h('span', { class: 'muted' }, ' • alterado em ' + dt(s.updatedAt)) : null),
+      h('p', { class: 'muted' }, 'Os clientes pagam por PIX (QR Code no próprio sistema) ou por cartão e boleto (página segura do Mercado Pago). Os dados de cartão nunca passam pelo nosso sistema. O Access Token e a assinatura secreta ficam criptografados e não são exibidos de volta.'),
+      h('label', {}, 'Access Token'), token,
+      h('label', {}, 'Public Key'), pub,
+      h('label', {}, 'Assinatura secreta do webhook'), secret,
+      h('label', {}, 'Endereço público desta API (para o Mercado Pago avisar os pagamentos)'), baseUrl,
+      h('p', { class: 'muted' }, 'Cadastre no painel do Mercado Pago (Suas integrações → Webhooks → evento "Pagamentos") a URL: ', h('strong', {}, s.webhookUrl)),
+      h('div', { class: 'row', style: 'margin-top:12px' },
+        h('button', { class: 'btn', onclick: save }, 'Salvar'),
+        h('button', { class: 'btn secondary', onclick: async () => { msg.textContent = 'Testando...'; try { const r = await call('POST', '/admin/v1/settings/mercadopago/test', {}); msg.textContent = (r.ok ? '✔ ' : '✖ ') + r.message; } catch (e) { msg.textContent = e.message; } } }, 'Testar credencial')),
+      msg, err),
+    h('div', { class: 'card' }, h('h2', {}, 'Como obter as credenciais'),
+      h('ol', {},
+        h('li', {}, 'Entre em mercadopago.com.br/developers → "Suas integrações" → crie uma aplicação (pagamentos online).'),
+        h('li', {}, 'Em "Credenciais de produção" copie o Access Token e a Public Key. Para testar sem cobrar, use as "Credenciais de teste" (começam com TEST-).'),
+        h('li', {}, 'Em "Webhooks", cadastre a URL acima, marque o evento Pagamentos e copie a "assinatura secreta".'),
+        h('li', {}, 'Sem endereço público (ex.: rodando só no seu computador) o aviso automático não chega: o cliente usa o botão "Já paguei" e o sistema consulta o Mercado Pago.'))),
+  ];
+}
+
+// ---------- E-mail (SMTP) ----------
+async function emailView() {
+  const s = await call('GET', '/admin/v1/settings/smtp');
+  const list = await call('GET', '/admin/v1/emails');
+  const msg = h('div', { class: 'muted' }), err = h('div', { class: 'error' });
+  const host = h('input', { value: s.host || '', placeholder: 'smtp.gmail.com, smtp-relay.brevo.com, smtp.office365.com...' });
+  const port = h('input', { value: s.port || 587, type: 'number', style: 'width:120px' });
+  const ssl = h('input', { type: 'checkbox' }); ssl.checked = s.ssl !== false;
+  const user = h('input', { value: s.user || '', autocomplete: 'off' });
+  const pass = h('input', { type: 'password', autocomplete: 'new-password', placeholder: s.hasPassword ? 'Configurada — preencha só para trocar' : 'Senha ou senha de app do e-mail' });
+  const from = h('input', { value: s.from || '', placeholder: 'nao-responda@seudominio.com.br ou seu Gmail' });
+  const fromName = h('input', { value: s.fromName || '', placeholder: 'Nome que aparece para o cliente' });
+  const to = h('input', { type: 'email', placeholder: 'Seu e-mail para receber o teste' });
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Salvar configuração de e-mail', text: 'Todos os e-mails do sistema (senhas, faturas, boas-vindas) passam a sair por este servidor.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/smtp', { host: host.value, port: +port.value, ssl: ssl.checked, user: user.value, password: pass.value || null, from: from.value, fromName: fromName.value }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'E-mail do sistema'),
+      h('p', {}, 'Situação: ', h('span', { class: 'pill ' + (s.configured ? 'ok' : 'warn') }, s.configured ? 'configurado' : 'não configurado (em desenvolvimento os e-mails viram arquivos .eml em dev-data/emails)')),
+      h('p', { class: 'muted' }, 'Usado para "esqueci minha senha", boas-vindas de funcionários e avisos de fatura. Com CPF você pode usar um Gmail com "senha de app" (até ~500 e-mails/dia) ou um serviço como Brevo (300/dia grátis).'),
+      h('div', { class: 'grid' },
+        h('div', {}, h('label', {}, 'Servidor SMTP'), host, h('label', {}, 'Porta'), port, h('label', { class: 'row' }, ssl, ' Usar TLS/SSL (recomendado)')),
+        h('div', {}, h('label', {}, 'Usuário'), user, h('label', {}, 'Senha'), pass, h('label', {}, 'E-mail do remetente'), from, h('label', {}, 'Nome do remetente'), fromName)),
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Salvar'), to,
+        h('button', { class: 'btn secondary', onclick: async () => { msg.textContent = 'Enviando...'; try { const r = await call('POST', '/admin/v1/settings/smtp/test', { to: to.value }); msg.textContent = (r.ok ? '✔ ' : '✖ ') + r.message; } catch (e) { msg.textContent = e.message; } } }, 'Enviar teste')),
+      msg, err),
+    h('div', { class: 'card' }, h('h2', {}, 'Últimos e-mails'),
+      list.length === 0 ? h('p', { class: 'muted' }, 'Nenhum e-mail ainda.') :
+      h('table', {}, h('thead', {}, h('tr', {}, ['Quando', 'Para', 'Assunto', 'Tipo', 'Situação'].map(x => h('th', {}, x)))),
+        h('tbody', {}, list.map(m => h('tr', {}, h('td', {}, dt(m.createdAt)), h('td', {}, m.to), h('td', {}, m.subject), h('td', {}, m.kind),
+          h('td', {}, h('span', { class: 'pill ' + (m.status === 'sent' ? 'ok' : m.status === 'failed' ? 'bad' : 'warn') }, m.status === 'sent' ? 'enviado' : m.status === 'failed' ? 'falhou' : `na fila (${m.attempts} tentativa(s))`),
+            m.lastError ? h('div', { class: 'muted' }, m.lastError) : null)))))),
+  ];
+}
+
+// ---------- Versão do caixa (atualização automática) ----------
+async function releasesView() {
+  const r = await call('GET', '/admin/v1/settings/desktop-release');
+  const err = h('div', { class: 'error' });
+  const ver = h('input', { value: r?.version || '', placeholder: '1.0.1', style: 'width:140px' });
+  const url = h('input', { value: r?.url || '', placeholder: 'https://github.com/SEU-USUARIO/SEU-REPO/releases/download/v1.0.1/Comercial-1.0.1-setup.exe' });
+  const sha = h('input', { value: r?.sha256 || '', placeholder: 'SHA-256 mostrado pelo dev/publish-pdv.ps1', style: 'font-family:monospace' });
+  const notes = h('input', { value: r?.notes || '', placeholder: 'O que mudou (aparece no aviso do caixa)' });
+  const mandatory = h('input', { type: 'checkbox' }); mandatory.checked = !!r?.mandatory;
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Publicar versão ' + ver.value, text: 'Todos os caixas vão oferecer esta atualização no próximo login. Confira o SHA-256: se não bater com o arquivo, o caixa recusa a instalação.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/desktop-release', { version: ver.value, url: url.value, sha256: sha.value, notes: notes.value, mandatory: mandatory.checked }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return h('div', { class: 'card' }, h('h2', {}, 'Atualização dos caixas'),
+    h('p', {}, 'Versão publicada: ', h('span', { class: 'pill ' + (r ? 'ok' : 'warn') }, r ? r.version : 'nenhuma')),
+    h('p', { class: 'muted' }, '1) Rode dev/publish-pdv.ps1 (gera o instalador e mostra o SHA-256). 2) Suba o .exe num endereço HTTPS (ex.: GitHub Releases). 3) Preencha abaixo. Os dados são assinados com a chave das licenças e o caixa confere o arquivo antes de instalar.'),
+    h('div', { class: 'grid' }, h('div', {}, h('label', {}, 'Versão'), ver, h('label', {}, 'Endereço do instalador (HTTPS)'), url),
+      h('div', {}, h('label', {}, 'SHA-256 do instalador'), sha, h('label', {}, 'Novidades'), notes, h('label', { class: 'row' }, mandatory, ' Obrigatória (instala mesmo com vendas na fila)'))),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Publicar versão')), err);
+}
+
+// ---------- NFS-e das mensalidades ----------
+async function nfseView() {
+  const s = await call('GET', '/admin/v1/settings/nfse');
+  const list = await call('GET', '/admin/v1/nfse');
+  const err = h('div', { class: 'error' }), msg = h('div', { class: 'muted' });
+  const enabled = h('input', { type: 'checkbox' }); enabled.checked = s.enabled;
+  const cnpj = h('input', { value: s.cnpj || '', placeholder: 'CNPJ da sua empresa (não aceita CPF)' });
+  const im = h('input', { value: s.municipalRegistration || '', placeholder: 'Inscrição municipal' });
+  const city = h('input', { value: s.cityCode || '', placeholder: 'Código IBGE do município (7 dígitos)' });
+  const item = h('input', { value: s.serviceItem || '01.07', placeholder: 'Item da lista de serviços (LC 116)' });
+  const rate = h('input', { value: s.issRate || '2.00', type: 'number', step: '0.01' });
+  const token = h('input', { type: 'password', autocomplete: 'off', placeholder: s.hasToken ? 'Configurado — preencha só para trocar' : 'Token do Focus NFe (NFS-e)' });
+  const env = h('select', {}, h('option', { value: 2 }, 'Homologação (testes)'), h('option', { value: 1 }, 'Produção')); env.value = s.environment;
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Salvar NFS-e', text: 'Com a NFS-e ligada, toda fatura paga gera nota fiscal de serviço automaticamente.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/nfse', { enabled: enabled.checked, cnpj: cnpj.value, municipalRegistration: im.value, cityCode: city.value, serviceItem: item.value, issRate: +rate.value, token: token.value || null, environment: +env.value }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Nota fiscal de serviço (NFS-e) das mensalidades'),
+      h('p', {}, 'Situação: ', h('span', { class: 'pill ' + (s.ready ? 'ok' : 'warn') }, s.ready ? 'ligada' : 'desligada')),
+      h('p', { class: 'muted' }, 'Exige CNPJ e inscrição municipal. Operando por CPF, deixe desligada; quando abrir a empresa, preencha aqui e ligue. Confirme com seu contador o item da lista de serviços e a alíquota do ISS do seu município.'),
+      h('div', { class: 'grid' },
+        h('div', {}, h('label', {}, 'CNPJ'), cnpj, h('label', {}, 'Inscrição municipal'), im, h('label', {}, 'Município (IBGE)'), city),
+        h('div', {}, h('label', {}, 'Item de serviço'), item, h('label', {}, 'Alíquota ISS (%)'), rate, h('label', {}, 'Token do provedor'), token, h('label', {}, 'Ambiente'), env)),
+      h('label', { class: 'row' }, enabled, ' Emitir NFS-e automaticamente quando a fatura for paga'),
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Salvar'),
+        h('button', { class: 'btn secondary', onclick: async () => { try { const r = await call('POST', '/admin/v1/nfse/run', {}); msg.textContent = `${r.processed} nota(s) processada(s).`; } catch (e) { msg.textContent = e.message; } } }, 'Processar fila agora')),
+      msg, err),
+    h('div', { class: 'card' }, h('h2', {}, 'Notas emitidas'),
+      list.length === 0 ? h('p', { class: 'muted' }, 'Nenhuma NFS-e ainda.') :
+      h('table', {}, h('thead', {}, h('tr', {}, ['Quando', 'Valor', 'Situação', 'Número', 'Mensagem'].map(x => h('th', {}, x)))),
+        h('tbody', {}, list.map(n => h('tr', {}, h('td', {}, dt(n.createdAt)), h('td', {}, money(n.amountCents)),
+          h('td', {}, h('span', { class: 'pill ' + (n.status === 'issued' ? 'ok' : n.status === 'error' ? 'bad' : 'warn') }, n.status)),
+          h('td', {}, n.number || '—', n.pdfUrl ? [' ', h('a', { href: n.pdfUrl, target: '_blank', rel: 'noopener' }, 'ver')] : null), h('td', {}, n.lastMessage || ''))))))
+  ];
+}
+
 async function plansView() {
   const plans = await call('GET', '/admin/v1/plans');
-  return h('div', { class: 'card' }, h('h2', {}, 'Planos'),
+  const su = await call('GET', '/admin/v1/settings/signup');
+  const err = h('div', { class: 'error' });
+  const enabled = h('input', { type: 'checkbox' }); enabled.checked = su.enabled;
+  const plan = h('select', {}, plans.map(p => { const o = h('option', { value: p.code }, p.name); if (p.code === su.planCode) o.selected = true; return o; }));
+  const days = h('input', { type: 'number', min: 0, max: 90, value: su.trialDays, style: 'width:120px' });
+  const saveSignup = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Salvar cadastro com teste grátis', text: 'Vale para os próximos cadastros feitos pelo aplicativo do caixa.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/signup', { enabled: enabled.checked, planCode: plan.value, trialDays: +days.value }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  const signupCard = h('div', { class: 'card' }, h('h2', {}, 'Cadastro com teste grátis'),
+    h('p', { class: 'muted' }, 'Lojistas podem criar a própria conta pelo caixa ("Criar conta grátis"): recebem um código no e-mail e a loja é criada com o plano e os dias de teste abaixo. A primeira fatura é gerada antes do fim do teste. Exige o e-mail do sistema configurado.'),
+    h('div', { class: 'row' }, h('label', { class: 'row' }, enabled, ' Permitir cadastro pelo aplicativo')),
+    h('div', { class: 'grid' }, h('div', {}, h('label', {}, 'Plano do teste'), plan), h('div', {}, h('label', {}, 'Dias de teste grátis (0 a 90)'), days)),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: saveSignup }, 'Salvar')), err);
+  return [signupCard, h('div', { class: 'card' }, h('h2', {}, 'Planos'),
     h('p', { class: 'muted' }, 'Alterações em planos não modificam assinaturas existentes (cada contrato guarda o preço e os limites da contratação).'),
     h('table', {}, h('thead', {}, h('tr', {}, ['Plano', 'Preço', 'Limites', 'Módulos'].map(x => h('th', {}, x)))),
       h('tbody', {}, plans.map(p => h('tr', {}, h('td', {}, h('strong', {}, p.name), h('div', { class: 'muted' }, p.code)), h('td', {}, money(p.priceCents) + (p.period === 12 ? '/ano' : '/mês')),
         h('td', {}, `${p.maxUsers} usuários • ${p.maxDevices} terminais • ${p.maxStores} lojas • ${p.graceDays} dias de tolerância`),
-        h('td', {}, p.modules.map(m => m.moduleKey).join(', ')))))));
+        h('td', {}, p.modules.map(m => m.moduleKey).join(', ')))))))];
 }
 
 async function diagnosticsView() {
@@ -370,7 +767,7 @@ async function diagnosticsView() {
 async function render(msg) {
   const root = document.getElementById('app');
   if (!state.token) { root.replaceChildren(loginView(msg)); linkLabels(root); return; }
-  const nav = [['tenants', 'Empresas'], ['plans', 'Planos'], ['diagnostics', 'Diagnóstico']];
+  const nav = [['tenants', 'Empresas'], ['invoices', 'Faturas'], ['payments', 'Pagamentos'], ['email', 'E-mail'], ['nfse', 'NFS-e'], ['releases', 'Atualizações'], ['plans', 'Planos'], ['diagnostics', 'Diagnóstico']];
   const header = h('header', {}, h('h1', {}, 'Painel do Desenvolvedor'),
     h('nav', {}, nav.map(([k, l]) => h('button', { class: state.view === k ? 'active' : '', onclick: () => { state.view = k; state.tenantId = null; render(); } }, l))),
     h('div', { class: 'spacer' }), h('span', { class: 'muted' }, `${state.me.email} (${state.me.role})`),
@@ -382,7 +779,7 @@ async function render(msg) {
   parts.push(main);
   root.replaceChildren(...parts);
   try {
-    const views = { tenants: tenantsView, new: newTenantView, tenant: tenantView, plans: plansView, diagnostics: diagnosticsView };
+    const views = { tenants: tenantsView, new: newTenantView, tenant: tenantView, invoices: invoicesView, payments: paymentsView, email: emailView, nfse: nfseView, releases: releasesView, plans: plansView, diagnostics: diagnosticsView };
     const content = await views[state.view]();
     main.replaceChildren(...[].concat(content));
     linkLabels(main);

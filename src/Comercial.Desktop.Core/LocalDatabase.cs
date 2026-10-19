@@ -25,9 +25,18 @@ public sealed class LocalDatabase
 {
     private readonly string _cs;
 
-    public LocalDatabase(string path)
+    /// <summary>Indica se o arquivo está criptografado (SQLCipher) — usado no diagnóstico e nos testes.</summary>
+    public bool Encrypted { get; }
+
+    /// <param name="key">Chave do SQLCipher. Com chave, um banco antigo sem criptografia é convertido na primeira abertura.</param>
+    public LocalDatabase(string path, string? key = null)
     {
-        _cs = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString();
+        EnsureCipherProvider();
+        if (!string.IsNullOrEmpty(key) && File.Exists(path) && IsPlainSqlite(path)) EncryptExisting(path, key);
+        var b = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false };
+        if (!string.IsNullOrEmpty(key)) b.Password = key;
+        _cs = b.ToString();
+        Encrypted = !string.IsNullOrEmpty(key);
         using var c = Open();
         Exec(c, """
             PRAGMA journal_mode=WAL;
@@ -44,8 +53,58 @@ public sealed class LocalDatabase
             CREATE INDEX IF NOT EXISTS ix_outbox_status ON outbox(status, id);
             CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS products(id TEXT PRIMARY KEY, sku TEXT, barcode TEXT, name TEXT, price_cents INTEGER, unit TEXT);
+            CREATE TABLE IF NOT EXISTS product_codes(code TEXT PRIMARY KEY, product_id TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS ix_products_barcode ON products(barcode);
             """);
+    }
+
+    private static readonly object ProviderLock = new();
+    private static bool _providerSet;
+
+    /// <summary>
+    /// Usa o motor SQLCipher (SQLite com criptografia). O Microsoft.Data.Sqlite inicializa o provedor padrão no
+    /// primeiro uso; por isso ele é tocado antes e o provedor é trocado em seguida (sem chave o SQLCipher se
+    /// comporta como SQLite comum, então outros bancos do mesmo processo continuam funcionando).
+    /// </summary>
+    private static void EnsureCipherProvider()
+    {
+        lock (ProviderLock)
+        {
+            if (_providerSet) return;
+            using (new SqliteConnection()) { }
+            SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlcipher());
+            _providerSet = true;
+        }
+    }
+
+    /// <summary>Banco SQLite comum começa com o cabeçalho "SQLite format 3"; o SQLCipher grava tudo cifrado.</summary>
+    public static bool IsPlainSqlite(string path)
+    {
+        var head = new byte[16];
+        using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return f.Read(head, 0, 16) == 16 && System.Text.Encoding.ASCII.GetString(head, 0, 15) == "SQLite format 3";
+    }
+
+    /// <summary>Converte um banco antigo (sem criptografia) para SQLCipher sem perder a fila de vendas.</summary>
+    private static void EncryptExisting(string path, string key)
+    {
+        var tmp = path + ".enc-tmp";
+        if (File.Exists(tmp)) File.Delete(tmp);
+        using (var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
+        {
+            c.Open();
+            using (var w = c.CreateCommand()) { w.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);"; w.ExecuteNonQuery(); }
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "ATTACH DATABASE $p AS enc KEY $k; SELECT sqlcipher_export('enc'); DETACH DATABASE enc;";
+            cmd.Parameters.AddWithValue("$p", tmp);
+            cmd.Parameters.AddWithValue("$k", key);
+            cmd.ExecuteNonQuery();
+        }
+        var backup = path + ".plain-old";
+        File.Move(path, backup, true);
+        foreach (var ext in new[] { "-wal", "-shm" }) if (File.Exists(path + ext)) File.Delete(path + ext);
+        File.Move(tmp, path);
+        File.Delete(backup); // a cópia antiga em texto puro não fica no disco
     }
 
     public SqliteConnection Open()
@@ -143,12 +202,22 @@ public sealed class LocalDatabase
         tx.Commit();
     }
 
+    /// <summary>Códigos de barras adicionais (caixa, código antigo do fornecedor...).</summary>
+    public void ReplaceCodes(IEnumerable<(string Code, Guid ProductId)> codes)
+    {
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        Exec(c, "DELETE FROM product_codes", tx);
+        foreach (var (code, id) in codes) Exec(c, "INSERT OR REPLACE INTO product_codes(code,product_id) VALUES($c,$p)", tx, ("$c", code), ("$p", id.ToString()));
+        tx.Commit();
+    }
+
     /// <summary>Busca no catálogo local por nome (parcial), SKU ou código de barras (exatos).</summary>
     public List<(Guid Id, string Sku, string? Barcode, string Name, long PriceCents)> SearchProducts(string term, int max)
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,sku,barcode,name,price_cents FROM products WHERE barcode=$c OR sku=$c OR name LIKE $l ESCAPE '\\' ORDER BY name LIMIT $m";
+        cmd.CommandText = "SELECT id,sku,barcode,name,price_cents FROM products WHERE barcode=$c OR sku=$c OR id IN (SELECT product_id FROM product_codes WHERE code=$c) OR name LIKE $l ESCAPE '\\' ORDER BY name LIMIT $m";
         cmd.Parameters.AddWithValue("$c", term);
         cmd.Parameters.AddWithValue("$l", "%" + term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
         cmd.Parameters.AddWithValue("$m", max);
@@ -156,6 +225,29 @@ public sealed class LocalDatabase
         using var r = cmd.ExecuteReader();
         while (r.Read()) list.Add((Guid.Parse(r.GetString(0)), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.GetString(3), r.GetInt64(4)));
         return list;
+    }
+
+    /// <summary>Produto pelo código da balança (PLU): compara com o SKU, ignorando zeros à esquerda.</summary>
+    public (Guid Id, string Name, long PriceCents, string Unit)? FindByPlu(string plu)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,name,price_cents,unit,sku FROM products";
+        using var r = cmd.ExecuteReader();
+        var target = plu.TrimStart('0');
+        while (r.Read())
+            if (r.GetString(4).TrimStart('0') == target && target.Length > 0)
+                return (Guid.Parse(r.GetString(0)), r.GetString(1), r.GetInt64(2), r.IsDBNull(3) ? "UN" : r.GetString(3));
+        return null;
+    }
+
+    public string UnitOf(Guid id)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT unit FROM products WHERE id=$i";
+        cmd.Parameters.AddWithValue("$i", id.ToString());
+        return cmd.ExecuteScalar() as string ?? "UN";
     }
 
     public (string Name, long PriceCents)? GetProduct(Guid id)
@@ -172,7 +264,7 @@ public sealed class LocalDatabase
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,name,price_cents FROM products WHERE barcode=$c OR sku=$c LIMIT 1";
+        cmd.CommandText = "SELECT id,name,price_cents FROM products WHERE barcode=$c OR sku=$c OR id IN (SELECT product_id FROM product_codes WHERE code=$c) LIMIT 1";
         cmd.Parameters.AddWithValue("$c", code);
         using var r = cmd.ExecuteReader();
         return r.Read() ? (Guid.Parse(r.GetString(0)), r.GetString(1), r.GetInt64(2)) : null;

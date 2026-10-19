@@ -99,8 +99,11 @@
         <Border Grid.Column="1" Width="540" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20,40,40,40"
                 Background="{DynamicResource CardBrush}" CornerRadius="20" Padding="48,44" BorderBrush="{DynamicResource LightBorderBrush}" BorderThickness="1">
             <Border.Effect><DropShadowEffect BlurRadius="40" ShadowDepth="8" Opacity="0.18" Color="#0B2A1E"/></Border.Effect>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,34">
+                <TextBlock Text="Criar conta grátis" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource LightTextBrush}" Margin="0,0,0,18"
+                           Visibility="{Binding SignupMode, Converter={StaticResource Vis}}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,34" Visibility="{Binding NotSignup, Converter={StaticResource Vis}}">
                     <Grid Width="92" Height="92">
                         <Ellipse Fill="{DynamicResource PrimarySoftBrush}"/>
                         <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="38" HorizontalAlignment="Center" Foreground="{DynamicResource PrimaryBrush}"/>
@@ -111,11 +114,13 @@
                     </StackPanel>
                 </StackPanel>
 
+                <StackPanel Visibility="{Binding NotSignup, Converter={StaticResource Vis}}">
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xE825;" FontSize="20" Foreground="{DynamicResource PrimaryBrush}" Margin="0,0,12,0"/>
                     <TextBlock Text="Código da empresa" FontSize="17" Foreground="{DynamicResource LightTextBrush}"/>
                 </StackPanel>
                 <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE825;" Text="{Binding TenantCode, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Código da empresa"/>
+                </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Margin="0,24,0,10">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xE715;" FontSize="20" Foreground="{DynamicResource PrimaryBrush}" Margin="0,0,12,0"/>
@@ -123,6 +128,7 @@
                 </StackPanel>
                 <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE715;" Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="E-mail"/>
 
+                <StackPanel Visibility="{Binding LoginMode, Converter={StaticResource Vis}}">
                 <StackPanel Orientation="Horizontal" Margin="0,24,0,10">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="20" Foreground="{DynamicResource PrimaryBrush}" Margin="0,0,12,0"/>
                     <TextBlock Text="Senha" FontSize="17" Foreground="{DynamicResource LightTextBrush}"/>
@@ -147,8 +153,56 @@
                     </ToggleButton>
                 </Grid>
 
+                <StackPanel Visibility="{Binding NeedTotp, Converter={StaticResource Vis}}" Margin="0,20,0,0">
+                    <TextBlock Text="Código do autenticador (6 dígitos)" FontSize="17" Foreground="{DynamicResource LightTextBrush}" Margin="0,0,0,10"/>
+                    <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE8D7;" Text="{Binding TotpCode, UpdateSourceTrigger=PropertyChanged}" MaxLength="6" AutomationProperties.Name="Código do autenticador"/>
+                </StackPanel>
                 <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE72A;" Content="Entrar" Height="58" FontSize="20" Margin="0,36,0,0"
                         Command="{Binding LoginCommand}" CommandParameter="{Binding ElementName=Pwd}" IsDefault="True"/>
+                <Button Content="Esqueci minha senha" HorizontalAlignment="Center" Margin="0,14,0,0" Cursor="Hand" Command="{Binding ForgotCommand}"
+                        Foreground="{DynamicResource PrimaryBrush}" Background="Transparent" BorderThickness="0" FontSize="15" AutomationProperties.Name="Esqueci minha senha"/>
+                <Button Content="Ainda não tem conta? Criar conta grátis" HorizontalAlignment="Center" Margin="0,6,0,0" Cursor="Hand" Command="{Binding SignupCommand}"
+                        Foreground="{DynamicResource PrimaryBrush}" Background="Transparent" BorderThickness="0" FontSize="15" FontWeight="SemiBold"/>
+                </StackPanel>
+
+                <!-- Cadastro com teste grátis (código de confirmação por e-mail) -->
+                <StackPanel Visibility="{Binding SignupMode, Converter={StaticResource Vis}}" Margin="0,12,0,0">
+                    <StackPanel Visibility="{Binding NotSignupSent, Converter={StaticResource Vis}}">
+                        <TextBlock Text="Nome da loja" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,0,0,8"/>
+                        <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE80F;" Text="{Binding CompanyName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Nome da loja"/>
+                        <TextBlock Text="Seu nome" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,14,0,8"/>
+                        <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE77B;" Text="{Binding OwnerName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Seu nome"/>
+                        <TextBlock Text="CPF ou CNPJ (opcional)" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,14,0,8"/>
+                        <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE8D7;" Text="{Binding Document, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="CPF ou CNPJ"/>
+                        <TextBlock Text="Crie uma senha (10+ caracteres, letras e números)" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,14,0,8"/>
+                        <PasswordBox x:Name="SignupPwd" Style="{StaticResource LightPassword}" AutomationProperties.Name="Senha da nova conta"/>
+                        <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE715;" Content="Enviar código de confirmação" Height="52" FontSize="17" Margin="0,18,0,0"
+                                Command="{Binding StartSignupCommand}" CommandParameter="{Binding ElementName=SignupPwd}"/>
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding SignupSent, Converter={StaticResource Vis}}">
+                        <TextBlock Text="Código recebido no e-mail (6 dígitos)" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,0,0,8"/>
+                        <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE8D7;" Text="{Binding SignupCode, UpdateSourceTrigger=PropertyChanged}" MaxLength="6" AutomationProperties.Name="Código de confirmação"/>
+                        <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE73E;" Content="Confirmar e criar minha loja" Height="52" FontSize="17" Margin="0,18,0,0"
+                                Command="{Binding VerifySignupCommand}" CommandParameter="{Binding ElementName=SignupPwd}"/>
+                    </StackPanel>
+                    <Button Content="Voltar para o login" HorizontalAlignment="Center" Margin="0,14,0,0" Cursor="Hand" Command="{Binding CancelSignupCommand}"
+                            Foreground="{DynamicResource PrimaryBrush}" Background="Transparent" BorderThickness="0" FontSize="15"/>
+                </StackPanel>
+
+                <!-- Redefinição de senha por código enviado ao e-mail -->
+                <StackPanel Visibility="{Binding ResetMode, Converter={StaticResource Vis}}" Margin="0,24,0,0">
+                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE715;" Content="Enviar código por e-mail" Height="52" FontSize="17" Command="{Binding SendCodeCommand}"/>
+                    <StackPanel Visibility="{Binding CodeSent, Converter={StaticResource Vis}}" Margin="0,18,0,0">
+                        <TextBlock Text="Código recebido (ex.: ABCD-2345)" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,0,0,8"/>
+                        <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE8D7;" Text="{Binding ResetCode, UpdateSourceTrigger=PropertyChanged}" CharacterCasing="Upper" AutomationProperties.Name="Código recebido"/>
+                        <TextBlock Text="Nova senha (10+ caracteres, letras e números)" FontSize="16" Foreground="{DynamicResource LightTextBrush}" Margin="0,16,0,8"/>
+                        <PasswordBox x:Name="NewPwd" Style="{StaticResource LightPassword}" AutomationProperties.Name="Nova senha"/>
+                        <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE73E;" Content="Trocar senha" Height="52" FontSize="17" Margin="0,18,0,0"
+                                Command="{Binding ResetCommand}" CommandParameter="{Binding ElementName=NewPwd}"/>
+                    </StackPanel>
+                    <Button Content="Voltar para o login" HorizontalAlignment="Center" Margin="0,14,0,0" Cursor="Hand" Command="{Binding CancelResetCommand}"
+                            Foreground="{DynamicResource PrimaryBrush}" Background="Transparent" BorderThickness="0" FontSize="15"/>
+                </StackPanel>
 
                 <Grid Margin="0,26,0,0" Visibility="{Binding Status, Converter={StaticResource Vis}}">
                     <Grid.ColumnDefinitions>
@@ -161,6 +215,7 @@
                     <Rectangle Grid.Column="2" Height="1" Fill="{DynamicResource LightBorderBrush}" VerticalAlignment="Center"/>
                 </Grid>
             </StackPanel>
+            </ScrollViewer>
         </Border>
     </Grid>
 </UserControl>

@@ -6,6 +6,15 @@ var app = builder.Build();
 
 var apiBase = app.Configuration["ApiBaseUrl"] ?? "http://localhost:5080";
 
+// Atrás do proxy HTTPS: entende que a conexão original era https (evita redirecionamento em loop).
+if (app.Configuration.GetValue("Proxy:Enabled", false))
+{
+    var fo = new ForwardedHeadersOptions { ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto, ForwardLimit = 1 };
+    fo.KnownIPNetworks.Clear(); fo.KnownProxies.Clear();
+    foreach (var n in app.Configuration.GetSection("Proxy:KnownNetworks").Get<string[]>() ?? []) fo.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(n));
+    app.UseForwardedHeaders(fo);
+}
+
 app.Use(async (ctx, next) =>
 {
     var h = ctx.Response.Headers;

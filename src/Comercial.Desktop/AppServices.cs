@@ -18,6 +18,8 @@ public sealed class DesktopSettings
     public Guid? DeviceId { get; set; }
     public string? TenantCode { get; set; }
     public Guid? StoreId { get; set; }
+    /// <summary>Impressora, gaveta, balança e etiquetas deste terminal.</summary>
+    public DeviceSettings Devices { get; set; } = new();
 
     public static string DataDir
     {
@@ -46,6 +48,7 @@ public sealed class DesktopSettings
 public sealed class SessionInfo
 {
     public string UserName { get; init; } = "";
+    public Guid? UserId { get; init; }
     public string TenantName { get; init; } = "";
     public HashSet<string> Permissions { get; init; } = [];
     public HashSet<string> Modules { get; init; } = [];
@@ -56,6 +59,7 @@ public sealed class SessionInfo
     public static SessionInfo From(JsonElement me) => new()
     {
         TenantName = me.GetProperty("tenant").GetProperty("tradeName").GetString() ?? "",
+        UserId = me.TryGetProperty("user", out var uid) && uid.ValueKind == JsonValueKind.String ? uid.GetGuid() : null,
         Permissions = me.GetProperty("permissions").EnumerateArray().Select(x => x.GetString()!).ToHashSet(),
         Modules = me.GetProperty("modules").EnumerateArray().Select(x => x.GetString()!).ToHashSet(),
         License = me.GetProperty("license").GetString() ?? "",
@@ -77,8 +81,10 @@ public sealed class AppServices
 
     public AppServices(string? dbPath = null)
     {
-        Db = new LocalDatabase(dbPath ?? Path.Combine(DesktopSettings.DataDir, "local.db"));
+        // Banco local criptografado (SQLCipher) com chave protegida pelo Windows.
+        Db = new LocalDatabase(dbPath ?? Path.Combine(DesktopSettings.DataDir, "local.db"), LocalDbKey.GetOrCreate(Path.Combine(DesktopSettings.DataDir, "local.key")));
         Api = new ApiClient(new HttpClient { BaseAddress = new Uri(Settings.ApiBaseUrl), Timeout = TimeSpan.FromSeconds(20) });
+        ReceiptPrinter.Devices = Settings.Devices;
     }
 
     public static string Money(long cents) => (cents / 100m).ToString("C", PtBr);

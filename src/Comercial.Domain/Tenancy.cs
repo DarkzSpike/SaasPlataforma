@@ -4,6 +4,14 @@ public enum TenantStatus { Active = 1, Suspended = 2, Cancelled = 3 }
 
 public class Tenant
 {
+    /// <summary>
+    /// Consentimento do proprietário: operações que o suporte pode fazer sem pedir aprovação a cada sessão
+    /// (lista separada por vírgula; vazio = toda alteração exige aprovação).
+    /// </summary>
+    public string? SupportPreAuthorizedOperations { get; set; }
+    public DateTimeOffset? SupportPreAuthorizedAt { get; set; }
+    public Guid? SupportPreAuthorizedByUserId { get; set; }
+
     public Guid Id { get; set; } = Guid.NewGuid();
     /// <summary>Código interno legível, usado para login e confirmação de operações críticas.</summary>
     public string Code { get; set; } = "";
@@ -38,6 +46,12 @@ public class User : TenantEntity
     public DateTimeOffset? LockoutUntil { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
+    /// <summary>Comissão sobre as vendas do funcionário (%). 0 = sem comissão.</summary>
+    public decimal CommissionPercent { get; set; }
+    /// <summary>Verificação em duas etapas (app autenticador). Segredo criptografado.</summary>
+    public bool TotpEnabled { get; set; }
+    public string? TotpSecretProtected { get; set; }
+    public long? TotpLastStep { get; set; }
     public List<UserRole> Roles { get; set; } = [];
 }
 

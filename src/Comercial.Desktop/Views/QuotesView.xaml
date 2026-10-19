@@ -1,0 +1,26 @@
+<UserControl x:Class="Comercial.Desktop.Views.QuotesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Comercial.Desktop">
+    <DockPanel>
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
+            <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE7BF;" Content="Abrir no caixa" Padding="16,0" Margin="0,0,10,0" Command="{Binding OpenCommand}"/>
+            <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE749;" Content="Imprimir" Padding="16,0" Margin="0,0,10,0" Command="{Binding PrintCommand}"/>
+            <Button Style="{StaticResource DarkButton}" Content="Cancelar orçamento" Padding="16,0" Foreground="{DynamicResource DangerBrush}" Command="{Binding CancelCommand}"/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Muted}" Margin="0,10,0,0" TextWrapping="Wrap"
+                   Text="Para criar: monte o carrinho no caixa e clique em Orçamento. Ao abrir no caixa, os preços são conferidos de novo com o cadastro atual."/>
+        <Border Style="{StaticResource Card}" ClipToBounds="True">
+            <DataGrid Style="{StaticResource DarkGrid}" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" AutomationProperties.Name="Orçamentos">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Nº" Binding="{Binding Number}" Width="70"/>
+                    <DataGridTextColumn Header="Cliente" Binding="{Binding Customer}" Width="*"/>
+                    <DataGridTextColumn Header="Total" Binding="{Binding Total}" Width="130"/>
+                    <DataGridTextColumn Header="Válido até" Binding="{Binding ValidUntil}" Width="130"/>
+                    <DataGridTextColumn Header="Situação" Binding="{Binding Status}" Width="140"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </DockPanel>
+</UserControl>
