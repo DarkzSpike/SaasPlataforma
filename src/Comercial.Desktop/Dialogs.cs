@@ -24,6 +24,15 @@ public sealed class SaleDoneViewModel(long totalCents, long paidCents, string me
     public string Headline => HasChange ? "Entregue o troco ao cliente" : "Venda registrada";
     public string ConfirmText => HasChange ? "Troco entregue — próxima venda" : "Próxima venda";
     public RelayCommand ConfirmCommand { get; } = RelayCommand.Sync(_ => onConfirm());
+
+    // NFC-e (preenchido quando a SEFAZ responde, logo depois da venda)
+    private Comercial.Desktop.Core.Hardware.NfceDanfe? _danfe;
+    private string _fiscalText = "";
+    public string FiscalText { get => _fiscalText; set { if (Set(ref _fiscalText, value)) Raise(nameof(HasFiscalText)); } }
+    public bool HasFiscalText => FiscalText.Length > 0;
+    public bool CanPrintDanfe => _danfe is { Printable: true };
+    public void SetDanfe(Comercial.Desktop.Core.Hardware.NfceDanfe d) { _danfe = d; Raise(nameof(CanPrintDanfe)); }
+    public RelayCommand PrintDanfeCommand => RelayCommand.Sync(_ => { if (_danfe is { Printable: true } d) ReceiptPrinter.PrintDanfe(d); });
 }
 
 public sealed class FormField(string key, string label, string value = "", string icon = "", string placeholder = "", IReadOnlyList<string>? options = null) : ObservableObject
@@ -38,6 +47,13 @@ public sealed class FormField(string key, string label, string value = "", strin
     public bool IsChoice => Options is not null;
     public bool IsText => Options is null;
     public string Value { get => _value; set => Set(ref _value, value); }
+
+    // Campo calculado (ex.: preço de venda a partir do custo e da % de lucro) e observação abaixo do campo.
+    private bool _readOnly;
+    private string _note = "";
+    public bool IsReadOnly { get => _readOnly; set => Set(ref _readOnly, value); }
+    public string Note { get => _note; set { if (Set(ref _note, value)) Raise(nameof(HasNote)); } }
+    public bool HasNote => Note.Length > 0;
 }
 
 /// <summary>Formulário sobreposto (campos de texto + foto opcional), usado no cadastro de produto e na entrada de estoque.</summary>
@@ -76,14 +92,15 @@ public sealed class FormViewModel : ObservableObject
 
     public string this[string key] => Fields.First(f => f.Key == key).Value.Trim();
 
-    public static BitmapImage? Load(byte[] bytes)
+    /// <param name="decodeWidth">Largura para decodificar (miniaturas: 320; 0 = tamanho original).</param>
+    public static BitmapImage? Load(byte[] bytes, int decodeWidth = 320)
     {
         try
         {
             var img = new BitmapImage();
             img.BeginInit();
             img.CacheOption = BitmapCacheOption.OnLoad;
-            img.DecodePixelWidth = 320;
+            if (decodeWidth > 0) img.DecodePixelWidth = decodeWidth;
             img.StreamSource = new MemoryStream(bytes);
             img.EndInit();
             img.Freeze();

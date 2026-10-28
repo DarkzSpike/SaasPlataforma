@@ -31,7 +31,8 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD}
     volumes:
       - ../postgres:/sql:ro
-    entrypoint: ["sh", "-c", "psql -v ON_ERROR_STOP=1 -q -f /sql/001_inicial.sql && psql -v ON_ERROR_STOP=1 -q -f /sql/002_seguranca_rls.sql && psql -q -c \"ALTER ROLE app_comercial PASSWORD '$$APP_DB_PASSWORD'\""]
+    # A senha vai como variável do psql (:'pw' é citada pelo próprio psql), nunca colada no texto do SQL.
+    entrypoint: ["sh", "-c", "psql -v ON_ERROR_STOP=1 -q -f /sql/001_inicial.sql && psql -v ON_ERROR_STOP=1 -q -f /sql/002_seguranca_rls.sql && echo \"ALTER ROLE app_comercial PASSWORD :'pw';\" | psql -X -v ON_ERROR_STOP=1 -q -v pw=\"$$APP_DB_PASSWORD\""]
     restart: "no"
 
   api:

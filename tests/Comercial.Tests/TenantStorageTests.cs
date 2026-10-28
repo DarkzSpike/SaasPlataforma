@@ -27,6 +27,16 @@ public sealed class FakeDriveGateway : IDriveGateway
 
     public Task<(byte[] Bytes, IDictionary<string, string>? AppProperties)?> DownloadAsync(DriveTarget t, string fileId, CancellationToken ct) =>
         Task.FromResult(Files.TryGetValue(fileId, out var f) ? ((byte[], IDictionary<string, string>?)?)(f.Bytes, f.Props) : null);
+
+    /// <summary>Pastas criadas na conta Google conectada (credencial usada, nome).</summary>
+    public ConcurrentDictionary<string, (string CredentialsJson, string Name)> Folders { get; } = new();
+
+    public Task<string> CreateFolderAsync(string credentialsJson, string name, CancellationToken ct)
+    {
+        var id = "pasta" + Guid.NewGuid().ToString("N");
+        Folders[id] = (credentialsJson, name);
+        return Task.FromResult(id);
+    }
 }
 
 public class DriveFactory : ApiFactory

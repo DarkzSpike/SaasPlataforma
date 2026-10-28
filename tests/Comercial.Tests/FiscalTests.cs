@@ -18,23 +18,61 @@ public sealed class FakeFiscalProvider : IFiscalProvider
     public ConcurrentQueue<JsonObject> Payloads { get; } = new();
     public ConcurrentBag<string> Tokens { get; } = [];
     public string Mode { get; set; } = "authorize";
+    /// <summary>Como o provedor responde ao download do XML: ok, missing (404), wrong_key (XML de outra nota), error (fora do ar).</summary>
+    public string XmlMode { get; set; } = "ok";
+    /// <summary>XMLs FICTÍCIOS, só para teste (sem valor fiscal), no formato dos originais com protocolo.</summary>
+    public ConcurrentDictionary<string, byte[]> Xmls { get; } = new();
     private int _number;
+
+    private static string Money(long c) => (c / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+    public static byte[] NfeProc(string key, long vnf, int cStat = 100) => System.Text.Encoding.UTF8.GetBytes(
+        $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><nfeProc xmlns=\"http://www.portalfiscal.inf.br/nfe\" versao=\"4.00\"><NFe><infNFe Id=\"NFe{key}\"><total><ICMSTot>" +
+        $"<vICMS>0.00</vICMS><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vNF>{Money(vnf)}</vNF><vTotTrib>{Money(vnf / 10)}</vTotTrib></ICMSTot></total></infNFe></NFe>" +
+        $"<protNFe versao=\"4.00\"><infProt><tpAmb>2</tpAmb><chNFe>{key}</chNFe><nProt>135260000000001</nProt><cStat>{cStat}</cStat><xMotivo>TESTE</xMotivo></infProt></protNFe></nfeProc>");
+    public static byte[] CancelProc(string key) => System.Text.Encoding.UTF8.GetBytes(
+        $"<procEventoNFe xmlns=\"http://www.portalfiscal.inf.br/nfe\" versao=\"1.00\"><evento><infEvento><chNFe>{key}</chNFe><tpEvento>110111</tpEvento></infEvento></evento>" +
+        $"<retEvento><infEvento><chNFe>{key}</chNFe><cStat>135</cStat><nProt>135260000000002</nProt></infEvento></retEvento></procEventoNFe>");
+    public static byte[] VoidProc() => System.Text.Encoding.UTF8.GetBytes(
+        "<procInutNFe xmlns=\"http://www.portalfiscal.inf.br/nfe\" versao=\"4.00\"><inutNFe/><retInutNFe><infInut><cStat>102</cStat><nProt>135260000000003</nProt></infInut></retInutNFe></procInutNFe>");
 
     public Task<FiscalProviderResult> TransmitAsync(FiscalContext c, FiscalDocument d, JsonObject payload, CancellationToken ct)
     {
         Payloads.Enqueue(payload); Tokens.Add(c.Token);
+        var n = Interlocked.Increment(ref _number);
+        var key = "3526" + n.ToString().PadLeft(40, '0');
+        var vnf = payload["items"]!.AsArray().Sum(i => (long)Math.Round(decimal.Parse(i!["valor_bruto"]!.ToString(), System.Globalization.CultureInfo.InvariantCulture) * 100)
+            - (long)Math.Round(decimal.Parse(i!["valor_desconto"]!.ToString(), System.Globalization.CultureInfo.InvariantCulture) * 100));
         return Task.FromResult(Mode switch
         {
             "retry" => new FiscalProviderResult(FiscalStatus.PendingTransmission, "SEFAZ indisponível", Retry: true),
             "reject" => new FiscalProviderResult(FiscalStatus.Rejected, "Rejeição 778: NCM inexistente"),
-            _ => new FiscalProviderResult(FiscalStatus.Authorized, "Autorizado o uso da NF-e", "135260000000001", "3526" + new string('1', 40),
-                Interlocked.Increment(ref _number), 1, "https://exemplo/danfe.pdf", "https://exemplo/nota.xml", "https://exemplo/qr"),
+            "deny" => Store(new FiscalProviderResult(FiscalStatus.Denied, "Uso denegado: irregularidade fiscal do emitente", "135260000000009", key, n, 1,
+                XmlUrl: $"https://exemplo/nota-{key}.xml"), key, NfeProc(key, vnf, 301)),
+            _ => Store(new FiscalProviderResult(FiscalStatus.Authorized, "Autorizado o uso da NF-e", "135260000000001", key,
+                n, 1, "https://exemplo/danfe.pdf", $"https://exemplo/nota-{key}.xml", "https://exemplo/qr"), key, NfeProc(key, vnf)),
         });
     }
-    public Task<FiscalProviderResult> CancelAsync(FiscalContext c, FiscalDocument d, string reason, CancellationToken ct) =>
-        Task.FromResult(new FiscalProviderResult(FiscalStatus.Cancelled, "Cancelamento homologado", "135260000000002"));
-    public Task<FiscalProviderResult> VoidNumbersAsync(FiscalContext c, int s, int a, int b, string r, CancellationToken ct) =>
-        Task.FromResult(new FiscalProviderResult(FiscalStatus.Authorized, "Inutilização homologada", "135260000000003"));
+    private FiscalProviderResult Store(FiscalProviderResult r, string key, byte[] xml) { Xmls[r.XmlUrl!] = xml; return r; }
+
+    public Task<FiscalProviderResult> CancelAsync(FiscalContext c, FiscalDocument d, string reason, CancellationToken ct)
+    {
+        var url = $"https://exemplo/canc-{d.AccessKey}.xml";
+        Xmls[url] = CancelProc(d.AccessKey!);
+        return Task.FromResult(new FiscalProviderResult(FiscalStatus.Cancelled, "Cancelamento homologado", "135260000000002", XmlUrl: url));
+    }
+    public Task<FiscalProviderResult> VoidNumbersAsync(FiscalContext c, int s, int a, int b, string r, CancellationToken ct)
+    {
+        var url = $"https://exemplo/inut-{s}-{a}-{b}-{Guid.NewGuid():N}.xml";
+        Xmls[url] = VoidProc();
+        return Task.FromResult(new FiscalProviderResult(FiscalStatus.Authorized, "Inutilização homologada", "135260000000003", XmlUrl: url));
+    }
+    public Task<byte[]?> DownloadXmlAsync(FiscalContext c, string url, CancellationToken ct) => XmlMode switch
+    {
+        "missing" => Task.FromResult<byte[]?>(null),
+        "error" => throw new HttpRequestException("provedor fora do ar"),
+        "wrong_key" => Task.FromResult<byte[]?>(NfeProc("3526" + new string('9', 40), 100)),
+        _ => Task.FromResult(Xmls.TryGetValue(url, out var b) ? b : null),
+    };
 }
 
 public sealed class FakeNfseProvider : INfseProvider

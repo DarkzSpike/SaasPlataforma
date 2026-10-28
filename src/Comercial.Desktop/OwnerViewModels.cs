@@ -106,10 +106,10 @@ public sealed class DashboardViewModel(ShellViewModel shell) : OwnerPage(shell, 
         var d = await S.Api.GetAsync("/api/v1/mobile/dashboard");
         long? Opt(string n) => d.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : null;
         Kpis.Clear();
-        Kpis.Add(new Kpi("Vendas hoje", AppServices.Money(d.GetProperty("todayRevenueCents").GetInt64()), $"{d.GetProperty("todaySalesCount").GetInt32()} venda(s)", "\uE7BF", "accent"));
-        if (Opt("todayGrossProfitCents") is { } tp) Kpis.Add(new Kpi("Lucro bruto hoje", AppServices.Money(tp), "estimado (sem despesas)", "\uE8C7", "primary"));
-        Kpis.Add(new Kpi("Vendas no mês", AppServices.Money(d.GetProperty("monthRevenueCents").GetInt64()), $"{d.GetProperty("monthSalesCount").GetInt32()} venda(s)", "\uE787", "accent"));
-        if (Opt("monthGrossProfitCents") is { } mp) Kpis.Add(new Kpi("Lucro bruto no mês", AppServices.Money(mp), "estimado (sem despesas)", "\uE8C7", "primary"));
+        Kpis.Add(new Kpi("Faturamento hoje", AppServices.Money(d.GetProperty("todayRevenueCents").GetInt64()), $"bruto • {d.GetProperty("todaySalesCount").GetInt32()} venda(s)", "\uE7BF", "accent"));
+        if (Opt("todayGrossProfitCents") is { } tp) Kpis.Add(new Kpi("Lucro do dia", AppServices.Money(tp), "vendas − custo dos produtos", "\uE8C7", "primary"));
+        Kpis.Add(new Kpi("Faturamento no mês", AppServices.Money(d.GetProperty("monthRevenueCents").GetInt64()), $"bruto • {d.GetProperty("monthSalesCount").GetInt32()} venda(s)", "\uE787", "accent"));
+        if (Opt("monthGrossProfitCents") is { } mp) Kpis.Add(new Kpi("Lucro do mês", AppServices.Money(mp), "vendas − custo dos produtos", "\uE8C7", "primary"));
         Kpis.Add(new Kpi("Caixas abertos", d.GetProperty("openCashSessions").GetInt32().ToString(), "agora", Icons.Bank, "neutral"));
         var shortToday = d.GetProperty("todayCashShortageCents").GetInt64();
         var shortMonth = d.GetProperty("monthCashShortageCents").GetInt64();
@@ -376,6 +376,8 @@ public sealed class StockRow(Guid productId, string name, string sku, string? ba
     public decimal MinValue { get; } = min;
     public long PriceCents { get; } = priceCents;
     public long CostCents { get; } = costCents;
+    public decimal? MarkupPercent { get; init; }
+    public bool OpenPrice { get; init; }
     public bool HasImage { get; } = hasImage;
     // Dados preservados na edição (unidade e fiscais).
     public string Unit { get; init; } = "UN";
@@ -658,6 +660,8 @@ public sealed class StockViewModel : OwnerPage
             r.GetProperty("costCents").GetInt64(), r.GetProperty("hasImage").GetBoolean())
         {
             Unit = Str(r, "unit") ?? "UN", Ncm = Str(r, "ncm"), Cest = Str(r, "cest"), Cfop = Str(r, "cfop"),
+            MarkupPercent = r.TryGetProperty("markupPercent", out var mk) && mk.ValueKind == JsonValueKind.Number ? mk.GetDecimal() : null,
+            OpenPrice = r.TryGetProperty("openPrice", out var opn) && opn.ValueKind == JsonValueKind.True,
             FiscalOrigin = r.TryGetProperty("fiscalOrigin", out var fo) && fo.ValueKind == JsonValueKind.Number ? fo.GetInt32() : 0,
             IcmsCst = Str(r, "icmsCst"), IbsCbsCst = Str(r, "ibsCbsCst"), IbsCbsClass = Str(r, "ibsCbsClass"),
         }));
@@ -692,6 +696,14 @@ public sealed class StockViewModel : OwnerPage
     private static bool TryQty(string s, out decimal v) => decimal.TryParse(s, System.Globalization.NumberStyles.Number, AppServices.PtBr, out v) && v >= 0;
 
     /// <summary>Cadastro (row = null) ou edição de produto, com foto opcional.</summary>
+    /// <summary>% digitada ("100", "35,5" ou "35.5%").</summary>
+    private static bool TryPercent(string s, out decimal v)
+    {
+        v = 0;
+        var t = s.Replace("%", "").Trim().Replace('.', ',');
+        return t.Length > 0 && decimal.TryParse(t, System.Globalization.NumberStyles.Number, AppServices.PtBr, out v) && v >= 0 && v <= Comercial.Shared.Pricing.MaxMarkupPercent;
+    }
+
     private void ProductForm(StockRow? row)
     {
         var f = new FormViewModel
@@ -703,8 +715,38 @@ public sealed class StockViewModel : OwnerPage
         f.Fields.Add(new FormField("name", "Nome do produto", row?.Name ?? "", Icons.Box));
         f.Fields.Add(new FormField("sku", "Código interno (SKU)", row?.Sku ?? "", Icons.Edit));
         f.Fields.Add(new FormField("barcode", "Código de barras", row?.Barcode ?? "", Icons.Chart, "opcional"));
-        f.Fields.Add(new FormField("price", "Preço de venda (R$)", row is null ? "" : (row.PriceCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
-        f.Fields.Add(new FormField("cost", "Custo (R$)", row is null ? "" : (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money));
+        // Quanto o dono pagou + % de lucro = preço de venda calculado (ex.: R$ 10,00 + 100% = R$ 20,00).
+        var costField = new FormField("cost", "Quanto você pagou pelo produto (custo R$)", row is null ? "" : (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money, "ex.: 10,00");
+        var markupField = new FormField("markup", "% de lucro em cima do custo", row?.MarkupPercent is { } mk ? mk.ToString("0.##", AppServices.PtBr) : "", Icons.Chart, "ex.: 100 (deixe vazio para digitar o preço)");
+        var priceField = new FormField("price", "Preço de venda (R$)", row is null ? "" : (row.PriceCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money);
+        f.Fields.Add(costField);
+        f.Fields.Add(markupField);
+        f.Fields.Add(priceField);
+        void Recalc()
+        {
+            var hasCost = PromptViewModel.TryMoney(costField.Value, out var c);
+            if (TryPercent(markupField.Value, out var m))
+            {
+                priceField.IsReadOnly = true;
+                if (!hasCost) { priceField.Note = "Custo inválido."; return; }
+                var p = Comercial.Shared.Pricing.PriceFromMarkup(c, m);
+                priceField.Value = (p / 100m).ToString("0.00", AppServices.PtBr);
+                priceField.Note = $"Calculado automaticamente • lucro de {AppServices.Money(p - c)} por unidade";
+            }
+            else
+            {
+                priceField.IsReadOnly = false;
+                priceField.Note = markupField.Value.Trim().Length > 0 ? "% inválida: use um número, ex.: 100"
+                    : hasCost && PromptViewModel.TryMoney(priceField.Value, out var pv) && Comercial.Shared.Pricing.MarkupFromPrice(c, pv) is { } imp
+                        ? $"Equivale a {imp.ToString("0.##", AppServices.PtBr)}% de lucro ({AppServices.Money(pv - c)} por unidade)" : "";
+            }
+        }
+        costField.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(FormField.Value)) Recalc(); };
+        markupField.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(FormField.Value)) Recalc(); };
+        priceField.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(FormField.Value) && !priceField.IsReadOnly) Recalc(); };
+        Recalc();
+        f.Fields.Add(new FormField("open", "Preço livre (valor digitado no caixa: código=preço)", row?.OpenPrice == true ? "Sim" : "Não", options: ["Não", "Sim"])
+            { Note = "Use para itens que não são cadastrados um a um, ex.: código 100 \"Diversos\" e no caixa 100=9,90." });
         f.Fields.Add(new FormField("min", "Estoque mínimo", row?.Min ?? "5", Icons.Box));
         f.Fields.Add(new FormField("unit", "Unidade", row?.Unit ?? "UN", options: Units));
         f.Fields.Add(new FormField("ncm", "NCM (8 dígitos — obrigatório para NFC-e)", row?.Ncm ?? "", Icons.Edit, "ex.: 61091000"));
@@ -716,12 +758,15 @@ public sealed class StockViewModel : OwnerPage
         {
             if (form["name"].Length == 0 || form["sku"].Length == 0) { form.Error = "Informe o nome e o código interno."; return false; }
             if (!PromptViewModel.TryMoney(form["price"], out var price) || !PromptViewModel.TryMoney(form["cost"], out var cost)) { form.Error = "Preço ou custo inválido."; return false; }
+            decimal? markup = null;
+            if (form["markup"].Length > 0) { if (!TryPercent(form["markup"], out var mv)) { form.Error = "% de lucro inválida (ex.: 100)."; return false; } markup = mv; }
             if (!TryQty(form["min"].Length == 0 ? "0" : form["min"], out var min)) { form.Error = "Estoque mínimo inválido."; return false; }
             decimal qty = 0;
             if (row is null && form["qty"].Length > 0 && !TryQty(form["qty"], out qty)) { form.Error = "Quantidade inicial inválida."; return false; }
             var body = new
             {
                 sku = form["sku"], barcode = form["barcode"].Length == 0 ? null : form["barcode"], name = form["name"], unit = form["unit"], priceCents = price, costCents = cost, minStock = min,
+                markupPercent = markup, openPrice = form["open"] == "Sim",
                 ncm = form["ncm"].Length == 0 ? null : form["ncm"], cest = form["cest"].Length == 0 ? null : form["cest"],
                 cfop = row?.Cfop, fiscalOrigin = row?.FiscalOrigin ?? 0, icmsCst = row?.IcmsCst, ibsCbsCst = row?.IbsCbsCst, ibsCbsClass = row?.IbsCbsClass,
             };

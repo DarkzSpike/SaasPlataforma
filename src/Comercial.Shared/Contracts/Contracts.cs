@@ -27,7 +27,9 @@ public sealed record CreateSaleRequest(
     Guid? DiscountAuthorizationId = null,
     Guid? PixChargeId = null,
     string? CouponCode = null,
-    Guid? QuoteId = null);
+    Guid? QuoteId = null,
+    // Loja que emite NFC-e só a pedido: o operador marca quando o cliente quer a nota.
+    bool? IssueNfce = null);
 
 public sealed record SaleResponse(Guid Id, string IdempotencyKey, string Status, long SubtotalCents, long DiscountCents, long TotalCents, long ChangeCents, bool Duplicate,
     long LoyaltyDiscountCents = 0, int PointsEarned = 0);

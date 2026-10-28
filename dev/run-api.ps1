@@ -2,6 +2,7 @@
 # Padrão: PostgreSQL local (banco comercial_dev). A cada início aplica os scripts IDEMPOTENTES de deploy
 # (001_inicial.sql + 002_seguranca_rls.sql) como superusuário e roda a API como app_comercial (com RLS),
 # então mudanças de schema NÃO apagam os dados da demo.
+# Escuta em todas as interfaces (*:5080, IPv4 e IPv6) para o app do celular conectar pela rede local (mesmo Wi-Fi).
 # Use -Sqlite para o modo antigo (arquivo dev-data/comercial-dev.db, recriado quando o schema muda).
 param([switch]$Sqlite)
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,7 @@ if ($old) {
 }
 
 if ($Sqlite) {
-  dotnet run --no-launch-profile -- --environment Development --urls http://localhost:5080 @common
+  dotnet run --no-launch-profile -- --environment Development --urls http://*:5080 @common
   exit
 }
 
@@ -31,8 +32,9 @@ $db = 'comercial_dev'
 if (-not (& $psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$db'")) { & $psql -d postgres -q -c "CREATE DATABASE $db" }
 & $psql -d $db -q -v ON_ERROR_STOP=1 -f (Join-Path $root 'deploy/postgres/001_inicial.sql') | Out-Null
 & $psql -d $db -q -v ON_ERROR_STOP=1 -f (Join-Path $root 'deploy/postgres/002_seguranca_rls.sql') | Out-Null
-& $psql -d $db -q -c "ALTER ROLE app_comercial PASSWORD '$($s.AppDbPassword)'" | Out-Null
+# Senha como VARIÁVEL do psql (:'pw' é citada pelo próprio psql): nunca colar segredo no texto do SQL.
+"ALTER ROLE app_comercial PASSWORD :'pw';" | & $psql -d $db -X -q -v ON_ERROR_STOP=1 -v "pw=$($s.AppDbPassword)" | Out-Null
 Remove-Item Env:PGPASSWORD, Env:PGOPTIONS
 
-dotnet run --no-launch-profile -- --environment Development --urls http://localhost:5080 `
+dotnet run --no-launch-profile -- --environment Development --urls http://*:5080 `
   --Database:Provider=Postgres "--ConnectionStrings:Main=Host=localhost;Database=$db;Username=app_comercial;Password=$($s.AppDbPassword)" @common

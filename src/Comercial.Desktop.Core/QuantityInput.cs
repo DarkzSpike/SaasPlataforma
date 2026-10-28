@@ -45,3 +45,26 @@ public static partial class QuantityInput
         return true;
     }
 }
+
+/// <summary>
+/// Preço digitado no caixa para produto de preço livre: "100=9,90", "100 = 9.90", "3*100=9,90" (a quantidade sai antes).
+/// </summary>
+public static partial class PriceInput
+{
+    [GeneratedRegex(@"^\s*(?<c>[^=]+?)\s*=\s*(?<p>\d{1,7}(?:[.,]\d{1,2})?)\s*$")]
+    private static partial Regex CodePrice();
+
+    /// <summary>true quando o texto tem "=": separa o código e o preço (em centavos). error preenchido se o preço for inválido.</summary>
+    public static bool TrySplit(string term, out string code, out long priceCents, out string? error)
+    {
+        code = term; priceCents = 0; error = null;
+        if (!term.Contains('=')) return false;
+        var m = CodePrice().Match(term);
+        if (!m.Success) { error = "Use código=preço, por exemplo 100=9,90."; return true; }
+        var value = decimal.Parse(m.Groups["p"].Value.Replace('.', ','), NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"));
+        code = m.Groups["c"].Value.Trim();
+        priceCents = (long)Math.Round(value * 100);
+        if (priceCents <= 0) error = "O preço precisa ser maior que zero.";
+        return true;
+    }
+}

@@ -284,10 +284,40 @@ public class AdminTests(ApiFactory f) : IClassFixture<ApiFactory>, IAsyncLifetim
         Assert.All(stored, s => Assert.Matches("^[0-9a-f]{32}\\.bin$", s));
     }
 
-    private async Task<HttpResponseMessage> Upload(byte[] bytes, string name, string type)
+    [Fact]
+    public async Task Empresa_troca_imagens_do_login_icone_e_textos_do_caixa()
+    {
+        var cfg = BrandingRules.Preset("moderno");
+        foreach (var (kind, set) in new (string, Action<Guid>)[] {
+            ("login_image", id => cfg.LoginImageAssetId = id), ("login_background", id => cfg.LoginBackgroundAssetId = id),
+            ("icon", id => cfg.IconAssetId = id), ("logo_dark", id => cfg.LogoDarkAssetId = id) })
+            set((await Api.Expect(await Upload(TestImages.Png(256, 256), kind + ".png", "image/png", kind), HttpStatusCode.OK)).GetProperty("id").GetGuid());
+        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(TestImages.Png(64, 64), "x.png", "image/png", "wallpaper")).StatusCode);
+        cfg.SystemName = "Mercado Bom Preço"; cfg.Tagline = "Qualidade e economia"; cfg.LoginSubtitle = "Entre para abrir o caixa.";
+        cfg.HeaderSubtitle = "Sua loja de bairro"; cfg.Feature1 = "Entrega grátis"; cfg.Feature2 = "Preço baixo"; cfg.Feature3 = "Desde 1998";
+        await Api.Expect(await api.Put($"/admin/v1/tenants/{T.Id}/branding/draft", admin, cfg), HttpStatusCode.OK);
+        await Api.Expect(await api.Post($"/admin/v1/tenants/{T.Id}/branding/publish", admin, new { confirmTenantCode = T.Code, note = "marca" }), HttpStatusCode.OK);
+        var live = (await Api.Expect(await api.Get("/api/v1/branding", T.OwnerToken), HttpStatusCode.OK)).GetProperty("config");
+        Assert.Equal("Qualidade e economia", live.GetProperty("tagline").GetString());
+        Assert.Equal("Desde 1998", live.GetProperty("feature3").GetString());
+        var bg = live.GetProperty("loginBackgroundAssetId").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await api.Get($"/api/v1/branding/assets/{bg}", T.OwnerToken)).StatusCode);
+        Assert.Equal(cfg.LoginImageAssetId, live.GetProperty("loginImageAssetId").GetGuid());
+
+        // Textos com HTML ou longos demais são recusados; asset inexistente também.
+        cfg.Feature1 = "<b>x</b>";
+        Assert.Equal(HttpStatusCode.BadRequest, (await api.Put($"/admin/v1/tenants/{T.Id}/branding/draft", admin, cfg)).StatusCode);
+        cfg.Feature1 = new string('a', 41);
+        Assert.Equal(HttpStatusCode.BadRequest, (await api.Put($"/admin/v1/tenants/{T.Id}/branding/draft", admin, cfg)).StatusCode);
+        cfg.Feature1 = "ok"; cfg.LoginBackgroundAssetId = Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.BadRequest, (await api.Put($"/admin/v1/tenants/{T.Id}/branding/draft", admin, cfg)).StatusCode);
+        await Api.Expect(await api.Post($"/admin/v1/tenants/{T.Id}/branding/reset", admin, new { confirmTenantCode = T.Code }), HttpStatusCode.NoContent);
+    }
+
+    private async Task<HttpResponseMessage> Upload(byte[] bytes, string name, string type, string kind = "logo")
     {
         using var form = new MultipartFormDataContent();
-        form.Add(new StringContent("logo"), "kind");
+        form.Add(new StringContent(kind), "kind");
         var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new MediaTypeHeaderValue(type);
         form.Add(file, "file", name);

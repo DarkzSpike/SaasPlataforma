@@ -4,6 +4,8 @@ using Comercial.Api.Security;
 
 namespace Comercial.Api.Services;
 
+public sealed record MobileReleaseRequest(int VersionCode, string? VersionName, string? Url, string? Notes, bool Mandatory);
+public sealed record SupportContactRequest(string? Whatsapp, string? Message);
 public sealed record DesktopReleaseRequest(string? Version, string? Url, string? Sha256, string? Notes, bool Mandatory);
 
 /// <summary>

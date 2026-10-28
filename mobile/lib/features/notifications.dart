@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/api_client.dart';
+import 'invoices.dart';
 
 /// Avisos para o dono (ex.: quebra de caixa). Também chegam por push quando o Firebase está configurado.
 class NotificationsPage extends StatefulWidget {
-  const NotificationsPage({super.key, required this.api});
+  const NotificationsPage({super.key, required this.api, this.canPay = false});
   final ApiClient api;
+  /// Mostra "Pagar agora" nos avisos de fatura (quem pode pagar as faturas do sistema).
+  final bool canPay;
   @override
   State<NotificationsPage> createState() => _NotificationsPageState();
 }
@@ -53,7 +56,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
               leading: Icon((n['type'] == 'cash.shortage' || n['type'] == 'cash.withdrawal') ? Icons.point_of_sale : Icons.notifications,
                   color: n['readAt'] == null ? Theme.of(context).colorScheme.error : null),
               title: Text(n['title'] as String, style: TextStyle(fontWeight: n['readAt'] == null ? FontWeight.bold : FontWeight.normal)),
-              subtitle: Text('${n['body']}\n${fmt.format(DateTime.parse(n['createdAt'] as String).toLocal())}'),
+              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${n['body']}\n${fmt.format(DateTime.parse(n['createdAt'] as String).toLocal())}'),
+                // Aviso de fatura a pagar: paga ali mesmo (PIX na hora, cartão/boleto, "Já paguei").
+                if (widget.canPay && const ['invoice.available', 'invoice.due_soon', 'invoice.changed'].contains(n['type']))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: FilledButton.icon(
+                      onPressed: () async { await _read(n); if (context.mounted) await showInvoicePay(context, widget.api, n['invoiceId'] as String?); },
+                      icon: const Icon(Icons.pix),
+                      label: const Text('Pagar agora'),
+                    ),
+                  ),
+              ]),
               isThreeLine: true,
             ),
           ),

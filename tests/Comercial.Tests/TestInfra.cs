@@ -51,6 +51,7 @@ public class ApiFactory : WebApplicationFactory<Program>
         b.UseSetting("Billing:AutoRun", "false"); // os testes disparam o faturamento explicitamente
         b.UseSetting("Email:AutoRun", "false");
         b.UseSetting("Fiscal:AutoRun", "false");
+        b.UseSetting("Accountant:AutoRun", "false");
         b.UseSetting("Jwt:TenantSigningKey", TenantJwtKey);
         b.UseSetting("Storage:Root", StorageRoot);
         b.UseSetting("Payments:generic:WebhookSecret", WebhookSecret);

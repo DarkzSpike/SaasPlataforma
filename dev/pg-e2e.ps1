@@ -20,7 +20,9 @@ Invoke-Psql @('-d', 'postgres', '-c', "DROP DATABASE IF EXISTS $db WITH (FORCE)"
 Invoke-Psql @('-d', 'postgres', '-c', "CREATE DATABASE $db")
 Invoke-Psql @('-d', $db, '-f', (Join-Path $root 'deploy/postgres/001_inicial.sql'))
 Invoke-Psql @('-d', $db, '-f', (Join-Path $root 'deploy/postgres/002_seguranca_rls.sql'))
-Invoke-Psql @('-d', $db, '-c', "ALTER ROLE app_comercial PASSWORD '$appPw'")
+# Senha como variável do psql (:'pw'), nunca concatenada no SQL.
+"ALTER ROLE app_comercial PASSWORD :'pw';" | & psql.exe -d $db -X -q -v ON_ERROR_STOP=1 -v "pw=$appPw"
+if ($LASTEXITCODE -ne 0) { throw 'psql falhou: ALTER ROLE' }
 
 Step 'API como app_comercial'
 $api = Start-Process dotnet -PassThru -WindowStyle Hidden -WorkingDirectory (Join-Path $root 'src/Comercial.Api') -RedirectStandardOutput "$env:TEMP\api-e2e.log" -RedirectStandardError "$env:TEMP\api-e2e.err" -ArgumentList @(

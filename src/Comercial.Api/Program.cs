@@ -26,6 +26,10 @@ builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddHttpClient<FocusNfeProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddScoped<IFiscalProvider>(sp => sp.GetRequiredService<FocusNfeProvider>());
+// Emissão direta na SEFAZ (sem provedor pago), com o certificado A1 da loja.
+builder.Services.AddSingleton<ISefazTransport, UnimakeSefazTransport>();
+builder.Services.AddScoped<SefazNfceProvider>();
+builder.Services.AddScoped<IFiscalProvider>(sp => sp.GetRequiredService<SefazNfceProvider>());
 builder.Services.AddHttpClient<INfseProvider, FocusNfseProvider>(c => c.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddScoped<RequestActor>();
 builder.Services.AddScoped<AuditService>();
@@ -38,6 +42,12 @@ builder.Services.AddScoped<CashService>();
 builder.Services.AddScoped<SalesService>();
 builder.Services.AddScoped<OperatingService>();
 builder.Services.AddScoped<FiscalService>();
+builder.Services.AddScoped<FiscalArchiveService>();
+builder.Services.AddScoped<DanfeService>();
+builder.Services.AddScoped<AccountingReportService>();
+builder.Services.AddScoped<MonthClosingService>();
+builder.Services.AddScoped<FiscalExportService>();
+builder.Services.AddScoped<AccountantService>();
 builder.Services.AddScoped<SyncService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<ModuleAdminService>();
@@ -74,9 +84,12 @@ builder.Services.AddScoped<ReportService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<SignupService>();
 builder.Services.AddScoped<DesktopReleaseService>();
+builder.Services.AddHttpClient<IGoogleOAuthClient, GoogleOAuthClient>(c => c.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddScoped<GoogleOAuthService>();
 builder.Services.AddScoped<UserTwoFactorService>();
 builder.Services.AddHostedService<ExpiryJob>();
 builder.Services.AddHostedService<FiscalJob>();
+builder.Services.AddHostedService<AccountingJob>();
 builder.Services.AddHostedService<NfseJob>();
 builder.Services.AddSingleton<IEmailTransport, SmtpEmailTransport>();
 builder.Services.AddHostedService<EmailJob>();
@@ -171,8 +184,25 @@ app.UseRateLimiter();
 app.UseMiddleware<ActorResolutionMiddleware>();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+// Retorno do Google depois de "Conectar minha conta Google" (sem login: a segurança está no state assinado e de uso único).
+app.MapGet(GoogleOAuthService.CallbackPath, async (string? code, string? state, string? error, GoogleOAuthService s, CancellationToken ct) =>
+{
+    var (ok, message) = await s.CallbackAsync(code, state, error, ct);
+    return Results.Content(GoogleOAuthService.Page(ok, message), "text/html; charset=utf-8", statusCode: ok ? 200 : 400);
+}).RequireRateLimiting("auth");
+
+// Arquivos públicos para download (APK do app). Só nomes simples terminados em .apk, de uma pasta própria.
+app.MapGet("/downloads/{name}", (string name, IConfiguration cfg, IHostEnvironment env) =>
+{
+    if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9._-]{1,80}\.apk$")) return Results.NotFound();
+    var dir = cfg["Downloads:Root"] ?? Path.Combine(cfg["Storage:Root"] ?? Path.Combine(env.ContentRootPath, "dev-data"), "downloads");
+    var path = Path.GetFullPath(Path.Combine(env.ContentRootPath, dir, name)); // Storage:Root pode ser relativo (dev-data/storage)
+    return File.Exists(path) ? Results.File(path, "application/vnd.android.package-archive", name) : Results.NotFound();
+});
 app.MapTenantApi();
 app.MapBusinessApi();
+app.MapFiscalAccountingApi();
 app.MapAdminApi();
 // Mercado Pago: valida x-signature e confirma o pagamento consultando a API do Mercado Pago (nunca confia só no aviso).
 app.MapPost("/webhooks/mercadopago", async (HttpRequest req, BillingService s, TenantContext tenant, CancellationToken ct) =>

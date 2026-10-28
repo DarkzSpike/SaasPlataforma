@@ -707,7 +707,7 @@ public sealed class PendingViewModel(ShellViewModel shell) : OwnerPage(shell, "P
 
 // ============================== Avisos ==============================
 
-public sealed record AlertRow(Guid Id, string Title, string Body, string When, bool Unread, string Glyph);
+public sealed record AlertRow(Guid Id, string Title, string Body, string When, bool Unread, string Glyph, Guid? InvoiceId = null, bool CanPay = false);
 
 public sealed class AlertsViewModel(ShellViewModel shell) : OwnerPage(shell, "Avisos", "Quebra de caixa, estoque baixo e outros alertas para o dono")
 {
@@ -718,13 +718,50 @@ public sealed class AlertsViewModel(ShellViewModel shell) : OwnerPage(shell, "Av
         if (p is AlertRow { Unread: true } r) { await S.Api.PostAsync($"/api/v1/notifications/{r.Id}/read", new { }); await LoadAsync(); }
     });
 
+    // ---------- "Pagar agora" direto no aviso da fatura (mesma lógica da tela Faturas) ----------
+    private InvoicesViewModel? _pay;
+    private InvoiceRow? _payRow;
+    private Guid? _payId;
+    /// <summary>Faturas (PIX, cartão/boleto, "Já paguei"): reaproveitada para pagar sem sair dos Avisos.</summary>
+    public InvoicesViewModel? Pay { get => _pay; private set => Set(ref _pay, value); }
+    public InvoiceRow? PayRow { get => _payRow; private set { if (Set(ref _payRow, value)) Raise(nameof(Paying)); } }
+    public bool Paying => PayRow is not null;
+    public RelayCommand ClosePayCommand => RelayCommand.Sync(_ => { PayRow = null; _payId = null; });
+
+    /// <summary>Usado só pelas capturas de tela.</summary>
+    public void SetPayForPreview(InvoicesViewModel pay, InvoiceRow row) { Pay = pay; _payId = row.Id; PayRow = row; }
+
+    public RelayCommand PayCommand => new(async p =>
+    {
+        if (p is not AlertRow { CanPay: true } r) return;
+        Error = "";
+        if (Pay is null)
+        {
+            Pay = new InvoicesViewModel(Shell);
+            // Depois de gerar o PIX ou de "Já paguei" a lista é recarregada: o painel acompanha a fatura atualizada.
+            Pay.Items.CollectionChanged += (_, _) => { if (_payId is { } id) PayRow = Pay.Items.FirstOrDefault(x => x.Id == id) ?? PayRow; };
+        }
+        await Pay.LoadAsync();
+        var row = (r.InvoiceId is { } iid ? Pay.Items.FirstOrDefault(x => x.Id == iid) : null) ?? Pay.Items.FirstOrDefault(x => x.IsOpen);
+        if (row is null) { Error = Pay.HasError ? Pay.Error : "Fatura não encontrada."; return; }
+        _payId = row.Id;
+        PayRow = row;
+        if (row.IsOpen && !row.HasPix) Pay.PixCommand.Execute(row); // já mostra o QR Code do PIX
+    });
+
     protected override async Task LoadCoreAsync()
     {
         Items.Clear();
         foreach (var n in (await S.Api.GetAsync("/api/v1/notifications")).EnumerateArray())
+        {
+            var type = n.GetProperty("type").GetString() ?? "";
+            Guid? invoice = n.TryGetProperty("invoiceId", out var iv) && iv.ValueKind == JsonValueKind.String ? iv.GetGuid() : null;
+            // Só para fatura ainda a pagar (aviso de pagamento confirmado não mostra o botão) e para quem pode pagar.
+            var canPay = type is "invoice.available" or "invoice.due_soon" or "invoice.changed" && S.Session.Can("billing.manage");
             Items.Add(new AlertRow(n.GetProperty("id").GetGuid(), n.GetProperty("title").GetString()!, n.GetProperty("body").GetString()!,
                 n.GetProperty("createdAt").GetDateTimeOffset().LocalDateTime.ToString("dd/MM/yyyy HH:mm"), n.GetProperty("readAt").ValueKind == JsonValueKind.Null,
-                n.GetProperty("type").GetString() is "cash.shortage" or "cash.withdrawal" ? Icons.Money : Icons.Box));
+                type is "cash.shortage" or "cash.withdrawal" ? Icons.Money : type.StartsWith("invoice.") ? Icons.Money : Icons.Box, invoice, canPay));
+        }
         Raise(nameof(IsEmpty));
     }
 }

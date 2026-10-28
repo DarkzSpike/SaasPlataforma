@@ -49,6 +49,30 @@
     <sys:String x:Key="BrandFirst">Gestão </sys:String>
     <sys:String x:Key="BrandLast">Comercial</sys:String>
     <sys:String x:Key="WelcomeMessage">Bem-vindo!</sys:String>
+    <!-- Personalização por empresa (white label): padrão do produto até a empresa publicar a sua -->
+    <sys:String x:Key="TaglineSpaced">S I M P L E S   •   R Á P I D O   •   E F I C I E N T E</sys:String>
+    <sys:String x:Key="LoginSubtitle">Faça login para acessar o sistema e continuar.</sys:String>
+    <sys:String x:Key="HeaderSubtitle">Mais praticidade para o seu negócio</sys:String>
+    <sys:String x:Key="Feature1">Seus dados protegidos</sys:String>
+    <sys:String x:Key="Feature2">Mais agilidade no seu dia</sys:String>
+    <sys:String x:Key="Feature3">Gestão completa do seu PDV</sys:String>
+    <Visibility x:Key="HasLogoOnDark">Collapsed</Visibility>
+    <Visibility x:Key="NoLogoOnDark">Visible</Visibility>
+    <Visibility x:Key="HasLogoOnLight">Collapsed</Visibility>
+    <Visibility x:Key="NoLogoOnLight">Visible</Visibility>
+    <Visibility x:Key="HasLoginImage">Collapsed</Visibility>
+    <Visibility x:Key="NoLoginImage">Visible</Visibility>
+    <Visibility x:Key="HasLoginBackground">Collapsed</Visibility>
+    <Visibility x:Key="HasBrandIcon">Collapsed</Visibility>
+    <Visibility x:Key="NoBrandIcon">Visible</Visibility>
+    <DrawingImage x:Key="DefaultWindowIcon">
+        <DrawingImage.Drawing>
+            <GeometryDrawing Brush="#12A86B" Geometry="M2,3 L5,3 L8,14 L19,14 L22,6 L7,6 M9,18 A1.5,1.5 0 1 0 9,21 A1.5,1.5 0 1 0 9,18 M17,18 A1.5,1.5 0 1 0 17,21 A1.5,1.5 0 1 0 17,18">
+                <GeometryDrawing.Pen><Pen Brush="#12A86B" Thickness="2"/></GeometryDrawing.Pen>
+            </GeometryDrawing>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+    <StaticResource x:Key="WindowIcon" ResourceKey="DefaultWindowIcon"/>
 
     <local:BoolToVisibility x:Key="Vis"/>
     <local:ToneToBrush x:Key="Tone"/>

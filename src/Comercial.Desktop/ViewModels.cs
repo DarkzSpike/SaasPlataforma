@@ -1,4 +1,5 @@
-﻿using System.Collections.ObjectModel;
+using System.Net.Http.Json;
+using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Controls;
@@ -15,13 +16,49 @@ public sealed class MainViewModel : ObservableObject
     public AppServices Services { get; }
     public object Current { get => _current; set => Set(ref _current, value); }
 
+    // Botão flutuante do WhatsApp de atendimento: número vem do painel admin (guardado para funcionar offline).
+    private string _waNumber = WhatsappLink.DefaultNumber, _waMessage = WhatsappLink.DefaultMessage;
+    public bool HasWhatsapp => WhatsappLink.Build(_waNumber, _waMessage) is not null;
+    public string WhatsappTip => "Dúvidas? Fale com o suporte no WhatsApp";
+    public RelayCommand WhatsappCommand => RelayCommand.Sync(_ =>
+    {
+        var shell = Current as ShellViewModel;
+        var url = WhatsappLink.Build(_waNumber, _waMessage, shell is null ? null : Services.Settings.TenantCode, shell?.UserLabel);
+        if (url is null) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception) { /* sem navegador padrão: nada a fazer */ }
+    });
+
+    private void LoadWhatsappCache()
+    {
+        if (Services.Db.Get("support.whatsapp") is { } n) _waNumber = n;
+        if (Services.Db.Get("support.whatsapp_message") is { } m) _waMessage = m;
+    }
+
+    public async Task RefreshWhatsappAsync()
+    {
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(Services.Settings.ApiBaseUrl), Timeout = TimeSpan.FromSeconds(10) };
+            var s = await http.GetFromJsonAsync<JsonElement>("/api/v1/public/support");
+            _waNumber = s.GetProperty("enabled").GetBoolean() ? s.GetProperty("whatsapp").GetString() ?? "" : "";
+            _waMessage = s.GetProperty("message").GetString() ?? WhatsappLink.DefaultMessage;
+            Services.Db.Set("support.whatsapp", _waNumber);
+            Services.Db.Set("support.whatsapp_message", _waMessage);
+            Raise(nameof(HasWhatsapp));
+        }
+        catch (Exception) { /* offline: mantém o último número salvo */ }
+    }
+
     public MainViewModel(AppServices? services = null)
     {
         Services = services ?? new AppServices();
+        LoadWhatsappCache();
         // Identidade em cache (última válida sincronizada) para o modo offline.
         if (Services.Db.Get("branding.config") is { } cached)
-            AppServices.ApplyBranding(JsonSerializer.Deserialize<BrandingConfig>(cached, ApiClient.Json) ?? new());
+            AppServices.ApplyBranding(JsonSerializer.Deserialize<BrandingConfig>(cached, ApiClient.Json) ?? new(), Services.BrandAsset);
         _current = new LoginViewModel(this);
+        _ = RefreshWhatsappAsync();
     }
 }
 
@@ -139,6 +176,48 @@ public sealed class LoginViewModel : ObservableObject
     public bool CodeSent { get => _codeSent; set => Set(ref _codeSent, value); }
     public string ResetCode { get => _resetCode; set => Set(ref _resetCode, value); }
     public RelayCommand ForgotCommand => RelayCommand.Sync(_ => { ResetMode = true; CodeSent = false; Status = "Informe o código da empresa e seu e-mail para receber um código."; });
+
+    /// <summary>Servidor que este caixa usa (rede local, túnel de demonstração ou VPS). Exibido no rodapé do login.</summary>
+    public string ServerText => "Servidor: " + _main.Services.Settings.ApiBaseUrl;
+
+    private bool _serverMode;
+    private string _serverInput = "", _serverError = "";
+    public bool ServerMode { get => _serverMode; set { if (Set(ref _serverMode, value)) Raise(nameof(NotServerMode)); } }
+    public bool NotServerMode => !ServerMode;
+    public string ServerInput { get => _serverInput; set => Set(ref _serverInput, value); }
+    public string ServerError { get => _serverError; set => Set(ref _serverError, value); }
+    public RelayCommand ServerCommand => RelayCommand.Sync(_ => { ServerInput = _main.Services.Settings.ApiBaseUrl; ServerError = ""; ServerMode = true; });
+    public RelayCommand CancelServerCommand => RelayCommand.Sync(_ => ServerMode = false);
+
+    /// <summary>
+    /// Troca o servidor sem reinstalar: confere se o endereço responde, salva e reabre o caixa.
+    /// Recusa se houver vendas ainda não enviadas (elas pertencem ao servidor anterior).
+    /// </summary>
+    public RelayCommand SaveServerCommand => new(async _ =>
+    {
+        var s = _main.Services;
+        ServerError = "";
+        if (!ServerAddress.TryNormalize(ServerInput, out var url, out var error)) { ServerError = error!; return; }
+        var pending = s.Db.Pending(1000).Count;
+        if (pending > 0 && url != s.Settings.ApiBaseUrl)
+        { ServerError = $"Há {pending} operação(ões) ainda não enviada(s) ao servidor atual. Sincronize antes de trocar."; return; }
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(url), Timeout = TimeSpan.FromSeconds(12) };
+            using var res = await http.GetAsync("/health");
+            if (!res.IsSuccessStatusCode) { ServerError = $"O servidor respondeu {(int)res.StatusCode}. Confira o endereço."; return; }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { ServerError = "Não foi possível conectar nesse endereço."; return; }
+        if (url != s.Settings.ApiBaseUrl)
+        {
+            // Outro servidor = outra empresa/terminal: o registro deste caixa no servidor anterior não vale lá.
+            s.Settings.ApiBaseUrl = url; s.Settings.DeviceId = null; s.Settings.StoreId = null; s.Settings.LicensePublicKeyPem = null;
+            s.Settings.Save();
+            try { System.IO.File.Delete(s.TokenPath); } catch (System.IO.IOException) { }
+        }
+        System.Diagnostics.Process.Start(Environment.ProcessPath!);
+        System.Windows.Application.Current.Shutdown();
+    });
     public RelayCommand CancelResetCommand => RelayCommand.Sync(_ => { ResetMode = false; Status = ""; });
     public RelayCommand SendCodeCommand => new(async _ =>
     {
@@ -278,11 +357,23 @@ public sealed class LoginViewModel : ObservableObject
         var branding = await s.Api.GetAsync("/api/v1/branding");
         var cfg = branding.GetProperty("config").Deserialize<BrandingConfig>(ApiClient.Json)!;
         s.Db.Set("branding.config", JsonSerializer.Serialize(cfg, ApiClient.Json));
-        AppServices.ApplyBranding(cfg);
+        // Imagens da empresa: baixa só as que ainda não estão no computador (ficam no banco local, valem offline).
+        foreach (var id in new[] { cfg.LogoAssetId, cfg.LogoDarkAssetId, cfg.IconAssetId, cfg.LoginImageAssetId, cfg.LoginBackgroundAssetId }.OfType<Guid>())
+        {
+            if (s.BrandAsset(id) is not null) continue;
+            try { if (await s.Api.GetBytesAsync($"/api/v1/branding/assets/{id}") is { Length: > 0 } bytes) s.Db.Set("brand.asset." + id.ToString("N"), Convert.ToBase64String(bytes)); }
+            catch (Exception ex) when (ex is ApiException or HttpRequestException) { /* tenta no próximo login; usa o padrão */ }
+        }
+        AppServices.ApplyBranding(cfg, s.BrandAsset);
         var products = await s.Api.GetAsync("/api/v1/catalog/products");
         s.Db.ReplaceProducts(products.EnumerateArray().Select(p => (p.GetProperty("id").GetGuid(), p.GetProperty("sku").GetString()!,
             p.TryGetProperty("barcode", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null,
             p.GetProperty("name").GetString()!, p.GetProperty("priceCents").GetInt64(), p.GetProperty("unit").GetString()!)));
+        s.Db.Set("catalog.openprice", JsonSerializer.Serialize(products.EnumerateArray()
+            .Where(p => p.TryGetProperty("openPrice", out var op) && op.ValueKind == JsonValueKind.True).Select(p => p.GetProperty("id").GetGuid())));
+        if (s.Session.Can("fiscal.emit", "fiscal"))
+            try { s.Db.Set("fiscal.mode", (await s.Api.GetAsync("/api/v1/fiscal/mode")).GetProperty("mode").GetString() ?? "sempre"); }
+            catch (ApiException) { /* sem permissão/módulo: mantém o último */ }
         try
         {
             var codes = await s.Api.GetAsync("/api/v1/catalog/barcodes");
@@ -316,6 +407,8 @@ public sealed class ShellViewModel : ObservableObject
     private SaleDoneViewModel? _saleDone;
     private FormViewModel? _form;
     public SaleDoneViewModel? SaleDone { get => _saleDone; set => Set(ref _saleDone, value); }
+    /// <summary>A loja não emite NFC-e (descoberto na 1ª venda): as próximas imprimem o comprovante na hora, sem esperar.</summary>
+    public bool NfceOff { get; set; }
     private PixPayViewModel? _pixPay;
     public PixPayViewModel? PixPay { get => _pixPay; set => Set(ref _pixPay, value); }
     public FormViewModel? Form { get => _form; set => Set(ref _form, value); }
@@ -831,10 +924,17 @@ public sealed class PosViewModel : ObservableObject
         RaiseCash();
     }
 
+    private bool _issueNfce;
+    /// <summary>Loja que emite NFC-e só a pedido: o operador marca quando o cliente quer a nota (desmarca sozinho após a venda).</summary>
+    public bool IssueNfce { get => _issueNfce; set => Set(ref _issueNfce, value); }
+    public bool NfceOnRequest => S.Db.Get("fiscal.mode") == "a_pedido" && S.Session.Can("fiscal.emit", "fiscal");
+    public void RefreshFiscalMode() => Raise(nameof(NfceOnRequest));
+
     private void Search()
     {
         Suggestions.Clear();
         QuantityInput.TryParse(Code, out _, out var term, out _); // "3*cad" sugere "Caderno..." mantendo a quantidade
+        if (term.Contains('=')) term = term[..term.IndexOf('=')].Trim(); // "100=9,90" sugere o produto 100
         if (term.Length >= 2)
             foreach (var p in S.Db.SearchProducts(term, 6))
                 Suggestions.Add(new ProductHit(p.Id, p.Name, p.Barcode ?? p.Sku, p.PriceCents));
@@ -844,9 +944,21 @@ public sealed class PosViewModel : ObservableObject
     private void Add()
     {
         if (!QuantityInput.TryParse(Code, out var qty, out var code, out var qtyError)) { Status = qtyError!; return; }
+        // Preço digitado: "100=9,90" (produto de preço livre, ex.: "Diversos").
+        if (PriceInput.TrySplit(code, out var priceCode, out var typedPrice, out var priceError))
+        {
+            if (priceError is not null) { Status = priceError; return; }
+            var match = S.Db.SearchProducts(priceCode, 5).FirstOrDefault(h => h.Sku == priceCode || h.Barcode == priceCode);
+            if (match.Id == Guid.Empty) { Status = $"Código {priceCode} não encontrado. Cadastre um produto com esse código (ex.: \"Diversos\") e marque \"Preço livre\"."; return; }
+            if (!S.IsOpenPrice(match.Id)) { Status = $"\"{match.Name}\" não aceita preço digitado. No cadastro do produto, marque \"Preço livre\"."; return; }
+            AddLine(match.Id, match.Name, qty, typedPrice);
+            return;
+        }
         // Etiqueta de balança (EAN-13 começando com 2): produto pelo código + preço ou peso embutidos.
+        // Produto com este código exato vem antes: códigos gerados pelo sistema (EAN-13 "200...") também começam com 2.
         var dev = S.Settings.Devices;
-        if (Comercial.Desktop.Core.Hardware.ScaleBarcodeParser.TryParse(code, new(dev.ScaleBarcodeMode, dev.ScaleCodeDigits, 11 - dev.ScaleCodeDigits), out var sb))
+        var exactCode = code.Length > 0 && S.Db.SearchProducts(code, 3).Any(h => h.Barcode == code);
+        if (!exactCode && Comercial.Desktop.Core.Hardware.ScaleBarcodeParser.TryParse(code, new(dev.ScaleBarcodeMode, dev.ScaleCodeDigits, 11 - dev.ScaleCodeDigits), out var sb))
         {
             if (S.Db.FindByPlu(sb.ProductCode) is not { } plu) { Status = $"Produto da balança (código {sb.ProductCode}) não encontrado. Confira o código interno (SKU)."; return; }
             var weight = sb.WeightGrams is { } g ? g / 1000m : plu.PriceCents > 0 ? Math.Round((decimal)sb.PriceCents!.Value / plu.PriceCents, 3) : 0;
@@ -859,6 +971,9 @@ public sealed class PosViewModel : ObservableObject
         var exact = hits.FirstOrDefault(h => h.Barcode == code || h.Sku == code);
         if (exact.Id == Guid.Empty && hits.Count == 1) exact = hits[0];
         if (exact.Id == Guid.Empty) { Status = hits.Count == 0 ? "Produto não encontrado no catálogo." : "Mais de um produto encontrado: escolha na lista."; return; }
+        // Cadastrado pelo celular sem preço: não vende por R$ 0,00 sem querer.
+        if (S.IsOpenPrice(exact.Id)) { Status = $"\"{exact.Name}\" tem preço livre: digite {exact.Sku}=valor, por exemplo {exact.Sku}=9,90."; return; }
+        if (exact.PriceCents <= 0) { Status = $"\"{exact.Name}\" está sem preço. Defina o preço em Estoque (ou no app) antes de vender."; return; }
         // Produto vendido a peso com balança no caixa: lê o peso automaticamente (se não foi digitado multiplicador).
         if (qty == 1 && !Code.Contains('*') && S.Db.UnitOf(exact.Id) == "KG" && !string.IsNullOrWhiteSpace(dev.ScalePort))
         {
@@ -872,12 +987,13 @@ public sealed class PosViewModel : ObservableObject
     private void AddProduct(ProductHit p)
     {
         if (!QuantityInput.TryParse(Code, out var qty, out _, out var qtyError)) { Status = qtyError!; return; }
+        if (S.IsOpenPrice(p.Id)) { Status = $"\"{p.Name}\" tem preço livre: digite {p.Code}=valor, por exemplo {p.Code}=9,90."; return; }
         AddLine(p.Id, p.Name, qty, p.PriceCents);
     }
 
     public void AddLine(Guid id, string name, decimal qty, long price)
     {
-        var existing = Cart.FirstOrDefault(c => c.Line.ProductId == id);
+        var existing = Cart.FirstOrDefault(c => c.Line.ProductId == id && c.Line.UnitPriceCents == price);
         if (existing is not null)
         {
             var idx = Cart.IndexOf(existing);
@@ -939,19 +1055,67 @@ public sealed class PosViewModel : ObservableObject
         try
         {
             var lines = Cart.Select(c => c.Line).ToList();
-            S.Pos!.RecordSale(S.Settings.StoreId!.Value, _cashSession!.Value, lines, parts.Select(p => new SalePaymentRequest(p.Method, p.Cents)).ToList(), SaleDiscountCents,
-                _customer?.Id, CanRedeem ? RedeemPoints : 0, _discountAuthId, pixChargeId, Coupon.Length == 0 ? null : Coupon, _quoteId);
+            var mode = S.Db.Get("fiscal.mode") ?? "sempre";
+            var wantsNfce = mode == "sempre" || mode == "a_pedido" && IssueNfce;
+            var saleKey = S.Pos!.RecordSale(S.Settings.StoreId!.Value, _cashSession!.Value, lines, parts.Select(p => new SalePaymentRequest(p.Method, p.Cents)).ToList(), SaleDiscountCents,
+                _customer?.Id, CanRedeem ? RedeemPoints : 0, _discountAuthId, pixChargeId, Coupon.Length == 0 ? null : Coupon, _quoteId, mode == "a_pedido" ? IssueNfce : null);
+            IssueNfce = false;
             var receipt = new Receipt(DateTime.Now, lines.Select(l => new ReceiptLine(l.Name, l.Quantity, l.UnitPriceCents, l.TotalCents)).ToList(),
                 total, LoyaltyDiscountCents + SaleDiscountCents + PromoCents, paid, methodName, _customer?.Name);
             Status = "";
             Cart.Clear(); Paid = ""; ClearDiscount(); PaymentLines.Clear(); RaisePayments(); Coupon = ""; _quoteId = null;
             ClearCustomer();
             _shell.ShowSaleDone(total, paid, methodName, receipt); // só fecha quando o operador confirmar o troco
-            if (ReceiptPrinter.AutoPrint(receipt, parts.Any(p => p.Method == PaymentSplit.Cash)) is { } printError) Status = printError;
-            _ = SyncNowAsync();
+            var cashSale = parts.Any(p => p.Method == PaymentSplit.Cash);
+            if (S.Session.Can("fiscal.emit", "fiscal") && !_shell.NfceOff && wantsNfce)
+                _ = EmitNfceAsync(saleKey, receipt, cashSale, _shell.SaleDone);
+            else
+            {
+                if (ReceiptPrinter.AutoPrint(receipt, cashSale) is { } printError) Status = printError;
+                _ = SyncNowAsync();
+            }
         }
         catch (InvalidOperationException ex) { Status = ex.Message; }
         _shell.RefreshStatus();
+    }
+
+    /// <summary>
+    /// Loja que emite NFC-e: sincroniza a venda, pede a emissão na hora e imprime o DANFE. Sem resposta (internet caiu) ou nota
+    /// não autorizada, sai o comprovante não fiscal e a nota segue na fila de emissão automática do servidor.
+    /// </summary>
+    private async Task EmitNfceAsync(string saleKey, Receipt receipt, bool cashSale, SaleDoneViewModel? done)
+    {
+        if (cashSale) ReceiptPrinter.OpenDrawer(); // gaveta abre na hora; a impressão espera a SEFAZ
+        if (done is not null) done.FiscalText = "Emitindo NFC-e…";
+        void Fallback(string text)
+        {
+            if (done is not null) done.FiscalText = text;
+            if (ReceiptPrinter.AutoPrint(receipt, false) is { } err) Status = err;
+        }
+        try
+        {
+            await SyncNowAsync();
+            var r = await S.Api.PostAsync($"/api/v1/fiscal/nfce/sale/{Uri.EscapeDataString(saleKey)}", new { });
+            var d = r.Deserialize<Comercial.Desktop.Core.Hardware.NfceDanfe>(ApiClient.Json)!;
+            if (d.Status == "sem_nfce") { _shell.NfceOff = true; Fallback(""); return; }
+            if (d.Printable)
+            {
+                done?.SetDanfe(d);
+                if (done is not null) done.FiscalText = $"NFC-e {d.Number} autorizada" + (d.Homologation ? " (homologação, sem valor fiscal)" : "");
+                if (ReceiptPrinter.AutoPrintDanfe(d) is { } err) Status = err;
+                return;
+            }
+            Fallback(d.Status switch
+            {
+                "rejeitada" => "NFC-e rejeitada: " + d.Message + " — corrija em Fiscal → Documentos. Saiu o comprovante não fiscal.",
+                "denegada" => "NFC-e denegada pela SEFAZ: " + d.Message,
+                _ => "NFC-e ainda não autorizada (" + d.Message + "). Ela será emitida automaticamente; saiu o comprovante não fiscal.",
+            });
+        }
+        catch (Exception ex) when (ex is ApiException or System.Net.Http.HttpRequestException or TaskCanceledException)
+        {
+            Fallback("Sem conexão com o servidor: a NFC-e será emitida automaticamente quando a internet voltar. Saiu o comprovante não fiscal.");
+        }
     }
 
     private async Task StoreEventAsync(bool open)
@@ -1129,6 +1293,7 @@ public sealed class PosViewModel : ObservableObject
         {
             var r = await S.Sync.RunOnceAsync();
             try { await LoginViewModel.RefreshOnlineDataAsync(S); } catch (ApiException) { }
+            RefreshFiscalMode();
             if (r.Rejected > 0) Status = $"{r.Rejected} operação(ões) recusada(s) pelo servidor — revisão do gerente necessária.";
             if (r.ClockSkew) Status = "Atenção: o relógio deste computador está diferente do servidor.";
             _shell.MarkOnline(true);

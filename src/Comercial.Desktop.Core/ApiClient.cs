@@ -60,9 +60,10 @@ public sealed class ApiClient(HttpClient http)
     }
 
     /// <summary>Envia um arquivo (multipart, campo "file"). O servidor valida o conteúdo real.</summary>
-    public async Task<JsonElement> UploadAsync(string path, byte[] bytes, string fileName, string contentType)
+    public async Task<JsonElement> UploadAsync(string path, byte[] bytes, string fileName, string contentType, IReadOnlyDictionary<string, string>? fields = null)
     {
         using var form = new MultipartFormDataContent();
+        foreach (var (k, v) in fields ?? new Dictionary<string, string>()) form.Add(new StringContent(v), k);
         var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         form.Add(file, "file", fileName);

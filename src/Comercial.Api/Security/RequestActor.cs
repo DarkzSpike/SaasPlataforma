@@ -37,6 +37,9 @@ public sealed class RequestActor
 public sealed class ActorResolutionMiddleware(RequestDelegate next)
 {
     public const string SupportHeader = "X-Support-Session";
+    /// <summary>O app do celular se identifica com "X-Client-App: mobile"; só usuários com a permissão do app passam.</summary>
+    public const string ClientHeader = "X-Client-App";
+    public static bool IsMobileClient(HttpRequest req) => string.Equals(req.Headers[ClientHeader], "mobile", StringComparison.OrdinalIgnoreCase);
 
     public async Task InvokeAsync(HttpContext ctx, RequestActor actor, TenantContext tenant, AppDbContext db)
     {
@@ -51,6 +54,9 @@ public sealed class ActorResolutionMiddleware(RequestDelegate next)
             if (t.Succeeded)
             {
                 if (!await ResolveTenantUser(t.Principal!, actor, tenant, db)) { await Reject(ctx); return; }
+                // Acesso ao app revogado pelo dono: vale na hora, mesmo com sessão aberta no celular.
+                if (IsMobileClient(ctx.Request) && !actor.Permissions.Contains(Domain.Security.Permissions.MobileAccess))
+                { await Reject(ctx, 403, "mobile_not_allowed"); return; }
             }
             else
             {
@@ -113,6 +119,9 @@ public sealed class ActorResolutionMiddleware(RequestDelegate next)
         if (aid is null) return false;
         var admin = await db.AdminUsers.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid);
         if (admin is null || !admin.IsActive) return false;
+        // E-mail ou senha trocados: tokens emitidos antes disso não valem mais.
+        if (admin.CredentialsChangedAt is { } changed && long.TryParse(p.FindFirst(JwtRegisteredClaimNames.Iat)?.Value, out var iat)
+            && iat < changed.ToUnixTimeSeconds()) return false;
         actor.Type = ActorType.Admin;
         actor.AdminId = admin.Id;
         actor.AdminRole = admin.Role;

@@ -2505,3 +2505,470 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261025174258_PercentualLucro') THEN
+    ALTER TABLE products ADD "MarkupPercent" numeric(18,3);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261025174258_PercentualLucro') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261025174258_PercentualLucro', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261025223536_AdminTrocaCredenciais') THEN
+    ALTER TABLE admin_users ADD "CredentialsChangedAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261025223536_AdminTrocaCredenciais') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261025223536_AdminTrocaCredenciais', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    DROP INDEX "IX_fiscal_events_TenantId";
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE fiscal_number_voids ADD "ArchiveAttempts" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE fiscal_number_voids ADD "ArchiveNextAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE fiscal_number_voids ADD "XmlUrl" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE fiscal_documents ADD "ArchiveAttempts" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE fiscal_documents ADD "ArchiveNextAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE fiscal_documents ADD "CancelXmlUrl" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE email_messages ADD "AttachmentName" character varying(200);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    ALTER TABLE email_messages ADD "AttachmentPath" character varying(400);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE TABLE accountant_deliveries (
+        "Id" uuid NOT NULL,
+        "FiscalExportId" uuid,
+        "Year" integer NOT NULL,
+        "Month" integer NOT NULL,
+        "Trigger" character varying(20) NOT NULL,
+        "Recipients" character varying(1500) NOT NULL,
+        "Status" character varying(30) NOT NULL,
+        "Detail" character varying(1000),
+        "CreatedByUserId" uuid,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "CompletedAt" timestamp with time zone,
+        "EmailMessageIds" character varying(1000) NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_accountant_deliveries" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_accountant_deliveries_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE TABLE accountant_settings (
+        "TenantId" uuid NOT NULL,
+        "OfficeName" character varying(120) NOT NULL,
+        "ContactName" character varying(120) NOT NULL,
+        "Email" character varying(320) NOT NULL,
+        "ExtraEmails" character varying(1000) NOT NULL,
+        "AutoSend" boolean NOT NULL,
+        "DayOfMonth" integer NOT NULL,
+        "Hour" integer NOT NULL,
+        "IncludeXml" boolean NOT NULL,
+        "IncludeReports" boolean NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        CONSTRAINT "PK_accountant_settings" PRIMARY KEY ("TenantId"),
+        CONSTRAINT "FK_accountant_settings_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE TABLE fiscal_exports (
+        "Id" uuid NOT NULL,
+        "Year" integer NOT NULL,
+        "Month" integer NOT NULL,
+        "StoreId" uuid,
+        "CreatedByUserId" uuid,
+        "Trigger" character varying(20) NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "FileName" character varying(200) NOT NULL,
+        "StorageName" character varying(80) NOT NULL,
+        "Sha256" character varying(64) NOT NULL,
+        "SizeBytes" bigint NOT NULL,
+        "ContentHash" character varying(64) NOT NULL,
+        "DocumentCount" integer NOT NULL,
+        "EventCount" integer NOT NULL,
+        "VoidCount" integer NOT NULL,
+        "ReportCount" integer NOT NULL,
+        "MissingCount" integer NOT NULL,
+        "ManifestJson" text NOT NULL,
+        "Summary" text NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_fiscal_exports" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_fiscal_exports_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE TABLE fiscal_month_closings (
+        "Id" uuid NOT NULL,
+        "Year" integer NOT NULL,
+        "Month" integer NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "ChecksJson" text NOT NULL,
+        "Notes" character varying(2000),
+        "LastCheckedAt" timestamp with time zone NOT NULL,
+        "ClosedByUserId" uuid,
+        "ClosedAt" timestamp with time zone,
+        "LastExportId" uuid,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_fiscal_month_closings" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_fiscal_month_closings_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE TABLE fiscal_xml_files (
+        "Id" uuid NOT NULL,
+        "FiscalDocumentId" uuid,
+        "NumberVoidId" uuid,
+        "Kind" character varying(20) NOT NULL,
+        "Model" integer NOT NULL,
+        "AccessKey" character varying(44),
+        "Content" bytea NOT NULL,
+        "Sha256" character varying(64) NOT NULL,
+        "SizeBytes" integer NOT NULL,
+        "ReferenceAt" timestamp with time zone NOT NULL,
+        "Source" character varying(40) NOT NULL,
+        "StoredAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_fiscal_xml_files" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_fiscal_xml_files_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE INDEX "IX_fiscal_events_TenantId_FiscalDocumentId" ON fiscal_events ("TenantId", "FiscalDocumentId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE INDEX "IX_accountant_deliveries_TenantId_Year_Month_Trigger" ON accountant_deliveries ("TenantId", "Year", "Month", "Trigger");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE INDEX "IX_fiscal_exports_TenantId_Year_Month_CreatedAt" ON fiscal_exports ("TenantId", "Year", "Month", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE UNIQUE INDEX "IX_fiscal_month_closings_TenantId_Year_Month" ON fiscal_month_closings ("TenantId", "Year", "Month");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE UNIQUE INDEX "IX_fiscal_xml_files_TenantId_FiscalDocumentId_Kind" ON fiscal_xml_files ("TenantId", "FiscalDocumentId", "Kind") WHERE "FiscalDocumentId" IS NOT NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE UNIQUE INDEX "IX_fiscal_xml_files_TenantId_NumberVoidId" ON fiscal_xml_files ("TenantId", "NumberVoidId") WHERE "NumberVoidId" IS NOT NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    CREATE INDEX "IX_fiscal_xml_files_TenantId_ReferenceAt" ON fiscal_xml_files ("TenantId", "ReferenceAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261027224919_FiscalContabilidade') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261027224919_FiscalContabilidade', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "AddressNumber" text NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "Cep" text NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CertificateNotAfter" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CertificatePasswordProtected" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CertificateProtected" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CertificateSubject" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CertificateThumbprint" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CityCode" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CityName" text NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CscId" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "CscProtected" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "District" text NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "LegalName" text NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "NfceNextNumber" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "Phone" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "QrCodeVersion" integer NOT NULL DEFAULT 0;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "Street" text NOT NULL DEFAULT '';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "TradeName" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE fiscal_documents ADD "ConsultUrl" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE fiscal_documents ADD "EmissionAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    ALTER TABLE fiscal_documents ADD "NumericCode" text;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    CREATE UNIQUE INDEX "IX_fiscal_documents_TenantId_Model_Series_Number" ON fiscal_documents ("TenantId", "Model", "Series", "Number") WHERE "Number" IS NOT NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028001747_EmissaoDiretaSefaz') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261028001747_EmissaoDiretaSefaz', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028100548_ModoEmissaoPrecoLivre') THEN
+    ALTER TABLE tenant_fiscal_profiles ADD "EmissionMode" character varying(20) NOT NULL DEFAULT 'sempre';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028100548_ModoEmissaoPrecoLivre') THEN
+    ALTER TABLE products ADD "OpenPrice" boolean NOT NULL DEFAULT FALSE;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261028100548_ModoEmissaoPrecoLivre') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261028100548_ModoEmissaoPrecoLivre', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+

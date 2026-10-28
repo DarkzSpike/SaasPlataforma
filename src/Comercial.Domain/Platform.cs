@@ -15,6 +15,8 @@ public class AdminUser
     public DateTimeOffset? LockoutUntil { get; set; }
     public long LastTotpStep { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>Última troca de e-mail/senha: tokens emitidos antes disso deixam de valer (outras sessões caem na hora).</summary>
+    public DateTimeOffset? CredentialsChangedAt { get; set; }
 }
 
 public enum SupportMode { ReadOnly = 1, Elevated = 2 }

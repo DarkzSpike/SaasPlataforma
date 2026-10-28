@@ -12,7 +12,6 @@ namespace Comercial.Api.Endpoints;
 
 public sealed record SuspendRequest(string ConfirmTenantCode, string Reason);
 public sealed record ConfirmRequest(string ConfirmTenantCode);
-public sealed record CreateInvoiceRequest(int? DueInDays);
 public sealed record TestEmailRequest(string To);
 
 public static class AdminEndpoints
@@ -47,11 +46,18 @@ public static class AdminEndpoints
         g.MapGet("/me", async (RequestActor a, AppDbContext db) =>
             Results.Ok(await db.AdminUsers.AsNoTracking().Where(x => x.Id == a.AdminId).Select(x => new { x.Id, x.Email, x.DisplayName, x.Role }).FirstAsync()));
 
+        // Minha conta: trocar e-mail e senha (senha atual + código do autenticador). Depois disso é preciso entrar de novo.
+        g.MapPut("/me/email", async (AdminChangeEmailRequest r, AuthService s) => { await s.AdminChangeEmailAsync(r); return Results.NoContent(); })
+            .Reauth().RequireRateLimiting("auth");
+        g.MapPut("/me/password", async (AdminChangePasswordRequest r, AuthService s) => { await s.AdminChangePasswordAsync(r); return Results.NoContent(); })
+            .Reauth().RequireRateLimiting("auth");
+
         // ---------- Empresas ----------
         g.MapGet("/tenants", async (AppDbContext db, string? q) =>
         {
             var query = db.Tenants.AsNoTracking();
-            if (!string.IsNullOrWhiteSpace(q)) query = query.Where(t => t.Code.Contains(q) || t.TradeName.Contains(q) || t.LegalName.Contains(q) || t.Document == q);
+            var term = InputRules.SearchTerm(q);
+            if (term is not null) query = query.Where(t => t.Code.Contains(term) || t.TradeName.Contains(term) || t.LegalName.Contains(term) || t.Document == term);
             var tenants = await query.OrderBy(t => t.TradeName).Take(200).ToListAsync();
             var ids = tenants.Select(t => t.Id).ToList();
             var subs = await db.Subscriptions.IgnoreQueryFilters().AsNoTracking().Where(s => ids.Contains(s.TenantId)).ToListAsync();
@@ -104,15 +110,35 @@ public static class AdminEndpoints
             return Results.NoContent();
         }).AdminOnly().Reauth();
         // Fatura do período atual (não duplica: se já existir, devolve a mesma).
-        g.MapPost("/tenants/{id:guid}/invoices", async (Guid id, CreateInvoiceRequest r, BillingService b) => Results.Ok(await b.EnsureCurrentInvoiceAsync(id, r.DueInDays ?? 5)))
+        g.MapPost("/tenants/{id:guid}/invoices", async (Guid id, CreateInvoiceRequest r, BillingService b) => Results.Ok(await b.CreateNowAsync(id, r)))
             .AdminOnly();
+        // Próximo vencimento da assinatura (muda o "dia de cobrança" daqui em diante).
+        g.MapPut("/tenants/{id:guid}/billing-date", async (Guid id, BillingDateRequest r, BillingService b) => Results.Ok(await b.SetNextBillingDateAsync(id, r)))
+            .AdminOnly().Reauth();
 
         // ---------- Faturamento (todas as empresas) ----------
         g.MapGet("/invoices/upcoming", async (BillingService b, int? days) => Results.Ok(await b.UpcomingAsync(days ?? 3)));
         g.MapPost("/billing/run", async (BillingService b) => Results.Ok(new { created = await b.GenerateDueInvoicesAsync(), reminders = await b.SendRemindersAsync() }))
             .AdminOnly();
+        // Editar fatura em aberto (vencimento e/ou valor) e cancelar fatura. O PIX/link antigo é invalidado.
+        g.MapPut("/invoices/{invoiceId:guid}", async (Guid invoiceId, EditInvoiceRequest r, BillingService b) => Results.Ok(await b.EditInvoiceAsync(invoiceId, r)))
+            .AdminOnly().Reauth();
+        g.MapPost("/invoices/{invoiceId:guid}/cancel", async (Guid invoiceId, SuspendRequest r, BillingService b) =>
+            Results.Ok(await b.CancelInvoiceAsync(invoiceId, r.ConfirmTenantCode, r.Reason))).AdminOnly().Reauth();
         g.MapPost("/invoices/{invoiceId:guid}/mark-paid", async (Guid invoiceId, SuspendRequest r, BillingService b) =>
             Results.Ok(await b.MarkPaidManuallyAsync(invoiceId, r.ConfirmTenantCode, r.Reason))).AdminOnly().Reauth();
+
+        // ---------- Versão do app Android ----------
+        g.MapGet("/settings/mobile-release", async (PlatformSettingsService s) => Results.Ok(await s.MobileReleaseAsync())).AdminOnly();
+        g.MapPut("/settings/mobile-release", async (MobileReleaseRequest r, PlatformSettingsService s, IHostEnvironment env) =>
+        {
+            await s.SaveMobileReleaseAsync(r, env.IsDevelopment() || env.EnvironmentName == "Testing");
+            return Results.Ok(await s.MobileReleaseAsync());
+        }).AdminOnly().Reauth();
+
+        // ---------- WhatsApp de atendimento ----------
+        g.MapGet("/settings/support", async (PlatformSettingsService s) => Results.Ok(await s.SupportContactAsync())).AdminOnly();
+        g.MapPut("/settings/support", async (SupportContactRequest r, PlatformSettingsService s) => { await s.SaveSupportContactAsync(r); return Results.Ok(await s.SupportContactAsync()); }).AdminOnly().Reauth();
 
         // ---------- Versão do caixa (atualização automática) ----------
         g.MapGet("/settings/desktop-release", async (PlatformSettingsService s) => Results.Ok(await s.DesktopReleaseAsync())).AdminOnly();
@@ -235,6 +261,15 @@ public static class AdminEndpoints
         g.MapGet("/tenants/{id:guid}/storage", async (Guid id, TenantStorageService s) => Results.Ok(await s.GetAsync(id)));
         g.MapPut("/tenants/{id:guid}/storage", async (Guid id, StorageSettingsRequest r, TenantStorageService s) => Results.Ok(await s.SaveAsync(id, r)))
             .AdminOnly().Reauth();
+        // Conectar a conta Google pessoal (OAuth): devolve o endereço de autorização do Google.
+        g.MapPost("/tenants/{id:guid}/storage/google/start", async (Guid id, GoogleOAuthService s, HttpRequest req) => Results.Ok(new { url = await s.StartAsync(id, req) }))
+            .AdminOnly().Reauth();
+        g.MapGet("/settings/google-oauth", async (GoogleOAuthService s, HttpRequest req) => Results.Ok(await s.SettingsViewAsync(req))).AdminOnly();
+        g.MapPut("/settings/google-oauth", async (GoogleOAuthSettingsRequest r, PlatformSettingsService p, GoogleOAuthService s, HttpRequest req) =>
+        {
+            await p.SaveGoogleOAuthAsync(r);
+            return Results.Ok(await s.SettingsViewAsync(req));
+        }).AdminOnly().Reauth();
         g.MapPost("/tenants/{id:guid}/storage/test", async (Guid id, TenantStorageService s, CancellationToken ct) => Results.Ok(await s.TestAsync(id, ct)))
             .AdminOnly();
 

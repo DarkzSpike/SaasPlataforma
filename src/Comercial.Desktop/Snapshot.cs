@@ -32,9 +32,9 @@ public static class Snapshot
                 TenantName = "Loja Demo", License = "active",
                 Permissions = ["sales.read", "sales.cancel", "reports.read", "reports.financial", "stock.read", "cash.review", "cash.operate", "sales.create", "products.write", "stock.entry", "stock.adjust",
                     "purchases.manage", "suppliers.manage", "purchases.approve", "purchases.receive", "customers.read", "customers.manage", "customers.privacy",
-                    "loyalty.manage", "finance.read", "finance.manage", "sync.reconcile", "reports.export", "sales.return", "billing.manage", "support.approve", "users.manage", "sales.discount.authorize"],
+                    "loyalty.manage", "finance.read", "finance.manage", "sync.reconcile", "reports.export", "sales.return", "billing.manage", "support.approve", "users.manage", "sales.discount.authorize", "fiscal.read", "fiscal.emit", "fiscal.export", "fiscal.close", "fiscal.send", "payments.configure"],
                 Modules = ["pdv", "estoque", "caixa", "app_proprietario", "lucratividade", "white_label", "compras", "fornecedores", "crm", "fidelidade",
-                    "contas", "financeiro", "despesas", "trocas", "relatorios_premium"],
+                    "contas", "financeiro", "despesas", "trocas", "relatorios_premium", "fiscal"],
             },
         };
         var main = new MainViewModel(services);
@@ -67,12 +67,20 @@ public static class Snapshot
         shell.Pos.AddLine(Guid.NewGuid(), "Caixa organizadora 20 L", 1, 4590);
         shell.Pos.Paid = "150,00";
         Save(window, Path.Combine(dir, "04-pdv-venda.png"));
+        // Loja que emite NFC-e só a pedido + item de preço livre ("100=9,90" → Diversos).
+        services.Db.Set("fiscal.mode", "a_pedido");
+        shell.Pos.RefreshFiscalMode();
+        shell.Pos.AddLine(Guid.NewGuid(), "Diversos", 1, 990);
+        shell.Pos.IssueNfce = true;
+        Save(window, Path.Combine(dir, "04b-pdv-nfce-a-pedido.png"));
+        shell.Pos.IssueNfce = false;
+
 
         var dash = new DashboardViewModel(shell);
-        dash.Kpis.Add(new Kpi("Vendas hoje", "R$ 1.284,90", "37 venda(s)", "\uE7BF", "accent"));
-        dash.Kpis.Add(new Kpi("Lucro bruto hoje", "R$ 602,15", "estimado (sem despesas)", "\uE8C7", "primary"));
-        dash.Kpis.Add(new Kpi("Vendas no mês", "R$ 21.940,30", "612 venda(s)", "\uE787", "accent"));
-        dash.Kpis.Add(new Kpi("Lucro bruto no mês", "R$ 10.112,80", "estimado (sem despesas)", "\uE8C7", "primary"));
+        dash.Kpis.Add(new Kpi("Faturamento hoje", "R$ 1.284,90", "bruto • 37 venda(s)", "\uE7BF", "accent"));
+        dash.Kpis.Add(new Kpi("Lucro do dia", "R$ 602,15", "vendas − custo dos produtos", "\uE8C7", "primary"));
+        dash.Kpis.Add(new Kpi("Faturamento no mês", "R$ 21.940,30", "bruto • 612 venda(s)", "\uE787", "accent"));
+        dash.Kpis.Add(new Kpi("Lucro do mês", "R$ 10.112,80", "vendas − custo dos produtos", "\uE8C7", "primary"));
         dash.Kpis.Add(new Kpi("Caixas abertos", "1", "agora", Icons.Bank, "neutral"));
         dash.Kpis.Add(new Kpi("Quebra de caixa", "R$ 37,50", "hoje R$ 12,50 · 2 fechamento(s) no mês", Icons.Money, "danger"));
         dash.Kpis.Add(new Kpi("Estoque baixo", "2", "produto(s) para repor", "\uE7B8", "warn"));
@@ -141,8 +149,10 @@ public static class Snapshot
             R("Caneca de cerâmica 300 ml", "CAN001", 38, 2490, true), R("Caderno universitário 10 matérias", "CAD002", 25, 2990),
             R("Copo de vidro 350 ml", "COP005", 118, 690), R("Pilha alcalina AA (par)", "PIL003", 57, 1190),
         };
-        stock.SetRows(rowsStock);
+        // Como na tela real: a página abre vazia e os produtos chegam depois (resposta do servidor).
         shell.ShowForPreview("stock", stock);
+        Save(window, Path.Combine(dir, "08-estoque-carregando.png"));
+        stock.SetRows(rowsStock);
         Save(window, Path.Combine(dir, "08-estoque.png"));
 
         stock.InventoryMode = true;
@@ -154,8 +164,9 @@ public static class Snapshot
         form.Fields.Add(new FormField("name", "Nome do produto", "Garrafa térmica 500 ml", Icons.Box));
         form.Fields.Add(new FormField("sku", "Código interno (SKU)", "GAR007", Icons.Edit));
         form.Fields.Add(new FormField("barcode", "Código de barras", "7891000100073", Icons.Chart));
-        form.Fields.Add(new FormField("price", "Preço de venda (R$)", "39,90", Icons.Money));
-        form.Fields.Add(new FormField("cost", "Custo (R$)", "18,50", Icons.Money));
+        form.Fields.Add(new FormField("cost", "Quanto você pagou pelo produto (custo R$)", "20,00", Icons.Money));
+        form.Fields.Add(new FormField("markup", "% de lucro em cima do custo", "100", Icons.Chart));
+        form.Fields.Add(new FormField("price", "Preço de venda (R$)", "40,00", Icons.Money) { IsReadOnly = true, Note = "Calculado automaticamente • lucro de R$ 20,00 por unidade" });
         form.Fields.Add(new FormField("min", "Estoque mínimo", "5", Icons.Box));
         form.Fields.Add(new FormField("qty", "Quantidade inicial na loja", "24", Icons.Add));
         form.Preview = thumb;
@@ -254,6 +265,14 @@ public static class Snapshot
         shell.ShowForPreview("invoices", inv);
         Save(window, Path.Combine(dir, "18-faturas.png"));
 
+        var alertsPay = new AlertsViewModel(shell);
+        alertsPay.Items.Add(new AlertRow(Guid.NewGuid(), "Nova fatura: R$ 149,90", $"Sua fatura do sistema vence em {due:dd/MM/yyyy}. Pague por PIX, boleto ou cartão em Faturas.", DateTime.Now.ToString("dd/MM/yyyy HH:mm"), true, Icons.Money, inv.Items[0].Id, true));
+        alertsPay.Items.Add(new AlertRow(Guid.NewGuid(), "Estoque baixo: Toalha de rosto algodão", "Restam 3 unidade(s) de Toalha de rosto algodão (mínimo 5). Considere repor.", "18/10/2026 14:05", false, Icons.Box));
+        alertsPay.GetType().GetMethod("Raise", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(alertsPay, ["IsEmpty"]);
+        alertsPay.SetPayForPreview(inv, inv.Items[0]);
+        shell.ShowForPreview("alerts", alertsPay);
+        Save(window, Path.Combine(dir, "18b-avisos-pagar.png"));
+
         var sup = new SupportViewModel(shell);
         sup.Options.Add(new SupportOption { Key = "products.write", Name = "cadastro de produtos", Checked = true });
         sup.Options.Add(new SupportOption { Key = "stock.adjust", Name = "ajuste de estoque", Checked = true });
@@ -296,24 +315,114 @@ public static class Snapshot
         shell.ShowForPreview("help", new HelpViewModel(shell));
         Save(window, Path.Combine(dir, "22-ajuda-e-atualizacao.png"));
 
+        // Fiscal e Contabilidade (dados de exemplo, sem valor fiscal).
+        var fis = new FiscalViewModel(shell);
+        fis.ShowForPreview("geral", v =>
+        {
+            v.Kpis.Add(new Kpi("NFC-e autorizadas", "412", "R$ 38.954,20", "", "primary"));
+            v.Kpis.Add(new Kpi("Canceladas", "3", "R$ 187,50", "", "warn"));
+            v.Kpis.Add(new Kpi("Rejeitadas/denegadas", "1", "precisam de análise", "", "danger"));
+            v.Kpis.Add(new Kpi("Pendentes", "2", "1 sem autorizar • 1 sem XML", "", "warn"));
+            v.Kpis.Add(new Kpi("Vendas do período", "R$ 39.141,70", "416 venda(s)", "", "accent"));
+            foreach (var x in new[] { "• 1 nota(s) aguardando transmissão", "• 1 nota(s) rejeitada(s) para corrigir", "• 1 nota(s) autorizada(s) sem XML original arquivado", "• 1 caixa(s) ainda aberto(s)" }) v.Pendencies.Add(x);
+            foreach (var x in new[] { "Dinheiro: R$ 12.410,00", "PIX: R$ 15.022,70", "Cartão de crédito: R$ 7.890,00", "Cartão de débito: R$ 3.819,00" }) v.PaymentLines.Add(x);
+            v.OverviewStatus = "Fechamento de Outubro/2026: em andamento\nÚltimo envio ao contador: 05/10/2026 08:00 (09/2026) — Aceito pelo servidor de e-mail";
+        });
+        shell.ShowForPreview("fiscal", fis);
+        Save(window, Path.Combine(dir, "23-fiscal-geral.png"));
+        fis.ShowForPreview("documentos", v =>
+        {
+            string K(int n) => "3526101122233300018165001" + n.ToString().PadLeft(19, '0');
+            v.Docs.Add(new FiscalDocRow(Guid.NewGuid(), "26/10/2026 18:42", "412", "1", "NFC-e 65", "Consumidor não identificado", "R$ 89,90", "Autorizada", "autorizada", 2, "Autorizado o uso da NF-e", "https://x", K(412), "135260004120012", true, false));
+            v.Docs.Add(new FiscalDocRow(Guid.NewGuid(), "26/10/2026 18:30", "411", "1", "NFC-e 65", "Maria Souza (cliente da venda)", "R$ 25,00", "Cancelada", "cancelada", 5, "Cancelamento homologado", "https://x", K(411), "135260004110017", true, true));
+            v.Docs.Add(new FiscalDocRow(Guid.NewGuid(), "26/10/2026 17:55", "—", "—", "NFC-e 65", "Consumidor não identificado", "R$ 12,50", "Rejeitada", "rejeitada", 3, "Rejeição 778: NCM inexistente", null, "", "", false, false));
+            v.Docs.Add(new FiscalDocRow(Guid.NewGuid(), "26/10/2026 17:40", "—", "—", "NFC-e 65", "Consumidor não identificado", "R$ 40,00", "Pendente", "pendente", 1, "SEFAZ processando; nova consulta em instantes.", null, "", "", false, false));
+            v.PageInfo = "416 documento(s) • página 1 de 9";
+        });
+        Save(window, Path.Combine(dir, "24-fiscal-documentos.png"));
+        fis.ShowForPreview("fechamento", v =>
+        {
+            v.Checks.Add(new CheckRow("Todas as vendas têm documento fiscal registrado", "concluido", "Concluído", "Todas as vendas concluídas têm documento registrado.", "", false));
+            v.Checks.Add(new CheckRow("Notas autorizadas com XML original guardado", "divergencia", "Com divergência", "1 nota(s) sem XML original no arquivo fiscal. Use \"Buscar XMLs no provedor\".", "   – 12/10/2026 14:03 • venda 8f2a91c0 • NFC-e 233/1 • XML original ainda não arquivado", true));
+            v.Checks.Add(new CheckRow("Cancelamentos com o XML do evento", "concluido", "Concluído", "Eventos de cancelamento arquivados.", "", false));
+            v.Checks.Add(new CheckRow("Documentos rejeitados ou denegados analisados", "em_analise", "Em análise", "1 documento(s) para analisar.", "", false));
+            v.Checks.Add(new CheckRow("Vendas com o documento fiscal esperado", "pendente", "Pendente", "1 nota(s) ainda não autorizada(s).", "", false));
+            v.Checks.Add(new CheckRow("Conciliação de pagamentos", "concluido", "Concluído", "PIX do caixa conciliado com o Mercado Pago. Cartões: conferir no extrato da adquirente.", "", false));
+            v.Checks.Add(new CheckRow("Arquivos e relatórios prontos para exportação", "pendente", "Pendente", "Nenhum pacote gerado para o mês.", "", false));
+            v.ClosingStatus = "Fechamento ainda não concluído. Resolva as pendências (ou registre nas observações como foram tratadas) e conclua.";
+        });
+        Save(window, Path.Combine(dir, "25-fiscal-fechamento.png"));
+        fis.ShowForPreview("contador", v =>
+        {
+            v.AccountantSummary = "Contabilidade Exemplo — Ana Lima\nE-mail: ana@contabilidade.exemplo (+ fiscal@contabilidade.exemplo)\nEnvio automático: todo dia 5 às 8h, com o pacote do mês anterior.";
+            v.Deliveries.Add(new DeliveryRow(Guid.NewGuid(), "05/10/2026 08:00", "09/2026", "automático", "aceito_pelo_servidor", "Aceito pelo servidor de e-mail", "ana@contabilidade.exemplo, fiscal@contabilidade.exemplo", "Aceito pelo servidor de e-mail (a leitura pelo contador não é confirmável).", "automático"));
+            v.Deliveries.Add(new DeliveryRow(Guid.NewGuid(), "05/09/2026 08:00", "08/2026", "automático", "bloqueado", "Bloqueado (pendências)", "ana@contabilidade.exemplo", "Notas autorizadas com XML original guardado: 2 nota(s) sem XML original.", "automático"));
+        });
+        Save(window, Path.Combine(dir, "26-fiscal-contador.png"));
+        fis.ShowForPreview("relatorios", v =>
+        {
+            var table = new System.Data.DataTable();
+            foreach (var h in new[] { "Meio", "Transacoes", "Valor bruto vendido", "Cancelado", "Estornado", "Liquido registrado", "Taxas", "Recebido conciliado", "Diferenca conciliacao" }) table.Columns.Add(h);
+            table.Rows.Add("Dinheiro", "188", "12.410,00", "45,00", "30,00", "12.380,00", "não disponível", "conferido no fechamento de caixa", "—");
+            table.Rows.Add("PIX", "141", "15.022,70", "0,00", "0,00", "15.022,70", "não disponível", "14.972,70", "-50,00");
+            table.Rows.Add("Cartão de crédito", "58", "7.890,00", "142,50", "0,00", "7.890,00", "não disponível", "sem integração com adquirente", "—");
+            table.Rows.Add("Cartão de débito", "29", "3.819,00", "0,00", "0,00", "3.819,00", "não disponível", "sem integração com adquirente", "—");
+            v.ReportView = table.DefaultView;
+            foreach (var x in new[] { "Total vendido (vendas concluídas): 39.141,70", "PIX vendido × confirmado pelo Mercado Pago: 15.022,70 × 14.972,70", "Divergências de conciliação PIX: 1" }) v.ReportTotals.Add(x);
+            v.ReportNotes = "• Valor vendido NÃO é o mesmo que valor recebido: dinheiro é conferido no fechamento do caixa; PIX do caixa é conciliado com o Mercado Pago;";
+        });
+        Save(window, Path.Combine(dir, "27-fiscal-relatorio.png"));
+
+        // DANFE NFC-e (exemplo de HOMOLOGAÇÃO, sem valor fiscal) como sai na impressora do Windows.
+        var danfe = new Comercial.Desktop.Core.Hardware.NfceDanfe("autorizada", "100 - Autorizado o uso da NF-e", 123, 1, "35261011222333000181650010000001231234567890",
+            "135260000123456", DateTimeOffset.Now, DateTimeOffset.Now, true, "https://www.homologacao.nfce.fazenda.sp.gov.br/qrcode?p=35261011222333000181650010000001231234567890|3|2|1|ABC",
+            "https://www.homologacao.nfce.fazenda.sp.gov.br/consulta", "LOJA TESTE LTDA", "11222333000181", "111222333444", "RUA DAS FLORES, 100 - CENTRO - SAO PAULO/SP",
+            [new("VAR-1", "Caneca de porcelana", 2, "UN", 1990, 3980), new("VAR-7", "Pilha alcalina AA (par)", 1, "UN", 1190, 1190)], 5170, 0, 5170,
+            [new("Dinheiro", 6000)], 830);
+        var paper = new Window { Width = 360, Height = 900, Left = -30000, Top = 0, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None,
+            Content = new System.Windows.Controls.FlowDocumentScrollViewer { Document = ReceiptPrinter.BuildDanfe(danfe), Background = Brushes.White, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled } };
+        paper.Show();
+        Save(paper, Path.Combine(dir, "28-danfe-nfce.png"));
+        paper.Close();
+        shell.ShowSaleDone(5170, 6000, "Dinheiro", new Receipt(DateTime.Now, [new ReceiptLine("Caneca de porcelana", 2, 1990, 3980)], 5170, 0, 6000, "Dinheiro"));
+        shell.SaleDone!.SetDanfe(danfe);
+        shell.SaleDone.FiscalText = "NFC-e 123 autorizada (homologação, sem valor fiscal)";
+        Save(window, Path.Combine(dir, "29-venda-nfce.png"));
+        shell.SaleDone = null;
+
+        // White label: outra empresa com logo, ícone, ilustração, fundo e textos próprios.
+        var brand = BrandingRules.Preset("vibrante");
+        brand.SystemName = "Bom Preço"; brand.CompanyName = "Mercado Bom Preço"; brand.WelcomeMessage = "Olá, equipe Bom Preço!";
+        brand.Tagline = "Qualidade e economia"; brand.LoginSubtitle = "Entre para abrir o caixa da loja.";
+        brand.HeaderSubtitle = "O mercado do seu bairro"; brand.Feature1 = "Entrega grátis"; brand.Feature2 = "Preço baixo"; brand.Feature3 = "Desde 1998";
+        var assets = new Dictionary<Guid, byte[]>();
+        Guid Add(byte[] png) { var id = Guid.NewGuid(); assets[id] = png; return id; }
+        brand.LogoDarkAssetId = Add(SamplePng(250, 200, 40, 240, 80));
+        brand.IconAssetId = Add(SamplePng(250, 120, 30));
+        brand.LoginImageAssetId = Add(SamplePng(60, 160, 240, 420, 280));
+        brand.LoginBackgroundAssetId = Add(SamplePng(200, 40, 90, 640, 400));
+        AppServices.ApplyBranding(brand, id => assets.GetValueOrDefault(id));
+        main.Current = shell;
+        Save(window, Path.Combine(dir, "30-marca-pdv.png"));
+        main.Current = new LoginViewModel(main);
+        Save(window, Path.Combine(dir, "31-marca-login.png"));
         window.Close();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { File.Delete(dbPath); } catch { /* temporário */ }
     }
 
     /// <summary>Imagem de exemplo (gradiente) para a miniatura do produto nas capturas.</summary>
-    private static byte[] SamplePng(byte r, byte g, byte b)
+    private static byte[] SamplePng(byte r, byte g, byte b, int w = 96, int hgt = 96)
     {
-        const int w = 96;
-        var px = new byte[w * w * 4];
-        for (var y = 0; y < w; y++)
+        var px = new byte[w * hgt * 4];
+        for (var y = 0; y < hgt; y++)
             for (var x = 0; x < w; x++)
             {
                 var i = (y * w + x) * 4;
-                var t = (x + y) / (2.0 * w);
+                var t = (x + y) / (double)(w + hgt);
                 px[i] = (byte)(b * (1 - t) + 255 * t * 0.3); px[i + 1] = (byte)(g * (1 - t * 0.5)); px[i + 2] = (byte)(r + (255 - r) * t * 0.4); px[i + 3] = 255;
             }
-        var src = BitmapSource.Create(w, w, 96, 96, PixelFormats.Bgra32, null, px, w * 4);
+        var src = BitmapSource.Create(w, hgt, 96, 96, PixelFormats.Bgra32, null, px, w * 4);
         var enc = new PngBitmapEncoder();
         enc.Frames.Add(BitmapFrame.Create(src));
         using var ms = new MemoryStream();

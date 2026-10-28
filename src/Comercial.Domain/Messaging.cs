@@ -16,6 +16,9 @@ public class EmailMessage
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? SentAt { get; set; }
     public DateTimeOffset? NextAttemptAt { get; set; }
+    /// <summary>Anexo opcional: arquivo gerado pelo servidor (ex.: pacote do contador). Caminho nunca vem do cliente.</summary>
+    public string? AttachmentPath { get; set; }
+    public string? AttachmentName { get; set; }
 }
 
 public static class EmailStatus

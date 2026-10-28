@@ -1,13 +1,19 @@
 ﻿# Popula a empresa de demonstração (API local em http://localhost:5080) com produtos e estoque.
 # Idempotente: produtos já existentes (mesmo SKU) são mantidos. Credenciais em dev/dev-secrets.local.json.
+# Outra empresa de teste: -TenantCode exemplo -OwnerEmail exemplo@gmail.com -OwnerPassword exemplo123 -TradeName "Exemplo"
+param([string]$TenantCode, [string]$OwnerEmail, [string]$OwnerPassword, [string]$TradeName)
 $ErrorActionPreference = 'Stop'
 $s = Get-Content (Join-Path $PSScriptRoot 'dev-secrets.local.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $TenantCode) { $TenantCode = $TenantCode }
+if (-not $OwnerEmail) { $OwnerEmail = $OwnerEmail }
+if (-not $OwnerPassword) { $OwnerPassword = $OwnerPassword }
+if (-not $TradeName) { $TradeName = 'Loja Demo' }
 $base = 'http://localhost:5080'
 $json = 'application/json; charset=utf-8'
 # A vírgula impede o PowerShell de "desenrolar" o byte[] em object[] (o corpo iria corrompido).
 function Body($o) { , [Text.Encoding]::UTF8.GetBytes(($o | ConvertTo-Json -Depth 5)) }
 
-$token = (Invoke-RestMethod "$base/api/v1/auth/login" -Method Post -ContentType $json -Body (Body @{ tenantCode = $s.DemoTenantCode; email = $s.DemoOwnerEmail; password = $s.DemoOwnerPassword })).accessToken
+$token = (Invoke-RestMethod "$base/api/v1/auth/login" -Method Post -ContentType $json -Body (Body @{ tenantCode = $TenantCode; email = $OwnerEmail; password = $OwnerPassword })).accessToken
 $h = @{ Authorization = "Bearer $token" }
 $store = (Invoke-RestMethod "$base/api/v1/stores" -Headers $h)[0].id
 $existing = @(Invoke-RestMethod "$base/api/v1/products" -Headers $h) | ForEach-Object { $_.sku }

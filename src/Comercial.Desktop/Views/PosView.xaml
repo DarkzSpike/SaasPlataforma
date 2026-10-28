@@ -14,6 +14,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Border Style="{StaticResource Card}" Padding="6">
                 <Grid>
@@ -135,6 +136,37 @@
 
             <TextBlock Grid.Row="2" Text="{Binding Status}" Foreground="{DynamicResource WarnBrush}" FontSize="15" Margin="4,12,0,0" TextWrapping="Wrap"
                        Visibility="{Binding Status, Converter={StaticResource Vis}}"/>
+
+            <!-- Loja e caixa: no centro, embaixo da lista de produtos (o painel da direita fica só com o pagamento) -->
+            <Border Grid.Row="3" Style="{StaticResource Card}" Padding="16,12" Margin="0,14,0,0">
+                <StackPanel>
+                    <TextBlock Text="{Binding StoreText}" Style="{StaticResource Muted}" Margin="2,0,0,10" AutomationProperties.Name="Situação da loja"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition/>
+                            <ColumnDefinition/>
+                            <ColumnDefinition/>
+                            <ColumnDefinition/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Button Grid.Column="0" Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE719;" Content="Abrir loja" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenStoreCommand}"
+                                ToolTip="Registra a abertura da loja (necessária para abrir o caixa)"/>
+                        <Button Grid.Column="1" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE719;" Content="Fechar loja" Margin="5,0,5,10" Padding="8,0" Command="{Binding CloseStoreCommand}"
+                                ToolTip="Só fecha depois que o caixa for fechado"/>
+                        <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE8C7;" Content="Abrir caixa" Margin="5,0,5,10" Padding="8,0" Command="{Binding OpenCashCommand}"
+                                ToolTip="Só abre com a loja aberta"/>
+                        <Button Grid.Column="3" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE72E;" Content="Fechar caixa" Margin="5,0,0,10" Padding="8,0" Command="{Binding CloseCashCommand}"/>
+                        <Button Grid.Row="1" Grid.Column="0" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE710;" Content="Suprimento" Margin="0,0,5,0" Padding="8,0" Command="{Binding SupplyCommand}"
+                                ToolTip="Colocar dinheiro na gaveta (reforço de troco)"/>
+                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8C7;" Content="Sangria" Margin="5,0,5,0" Padding="8,0" Command="{Binding WithdrawalCommand}"
+                                Foreground="{DynamicResource WarnBrush}" ToolTip="Retirada de dinheiro do caixa; o proprietário é avisado"/>
+                        <Button Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE895;" Content="Sincronizar agora" Margin="5,0,0,0" Command="{Binding SyncCommand}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- Painel de pagamento -->
@@ -203,6 +235,8 @@
                 <TextBlock Text="{Binding PromoSummary}" Foreground="{DynamicResource PrimaryLightBrush}" FontWeight="SemiBold" Margin="0,12,0,0" Visibility="{Binding PromoSummary, Converter={StaticResource Vis}}"/>
                 <TextBox Style="{StaticResource DarkInput}" local:Ui.Icon="&#xE8EC;" local:Ui.Placeholder="Cupom de desconto (opcional)" Margin="0,12,0,0"
                          Text="{Binding Coupon, UpdateSourceTrigger=LostFocus}" CharacterCasing="Upper" AutomationProperties.Name="Cupom de desconto"/>
+                <CheckBox Content="Emitir NFC-e (o cliente pediu a nota)" IsChecked="{Binding IssueNfce}" Foreground="White" FontSize="14" Margin="0,12,0,0"
+                          Visibility="{Binding NfceOnRequest, Converter={StaticResource Vis}}" AutomationProperties.Name="Emitir NFC-e"/>
                 <TextBlock Text="Forma de pagamento" Style="{StaticResource SectionTitle}" Margin="0,18,0,10"/>
                 <ComboBox Style="{StaticResource DarkCombo}" local:Ui.Icon="&#xE8C7;" ItemsSource="{Binding PaymentOptions}" SelectedItem="{Binding Method}" AutomationProperties.Name="Forma de pagamento">
                     <ComboBox.ItemTemplate>
@@ -248,24 +282,6 @@
                             ToolTip="Desconto no total da venda (exige autorização do proprietário)"/>
                     <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE74D;" Content="Limpar" Margin="6,0,0,0" Command="{Binding ClearCommand}"/>
                 </UniformGrid>
-                <Rectangle Height="1" Fill="{DynamicResource DarkBorderBrush}" Margin="0,16"/>
-                <TextBlock Text="{Binding StoreText}" Style="{StaticResource Muted}" Margin="0,0,0,8" AutomationProperties.Name="Situação da loja"/>
-                <UniformGrid Columns="2">
-                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE719;" Content="Abrir loja" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenStoreCommand}"
-                            ToolTip="Registra a abertura da loja (necessária para abrir o caixa)"/>
-                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE719;" Content="Fechar loja" Margin="5,0,0,10" Padding="8,0" Command="{Binding CloseStoreCommand}"
-                            ToolTip="Só fecha depois que o caixa for fechado"/>
-                    <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE8C7;" Content="Abrir caixa" Margin="0,0,5,10" Padding="8,0" Command="{Binding OpenCashCommand}"
-                            ToolTip="Só abre com a loja aberta"/>
-                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE72E;" Content="Fechar caixa" Margin="5,0,0,10" Padding="8,0" Command="{Binding CloseCashCommand}"/>
-                </UniformGrid>
-                <UniformGrid Columns="2">
-                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE710;" Content="Suprimento" Margin="0,0,5,10" Padding="8,0" Command="{Binding SupplyCommand}"
-                            ToolTip="Colocar dinheiro na gaveta (reforço de troco)"/>
-                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE8C7;" Content="Sangria" Margin="5,0,0,10" Padding="8,0" Command="{Binding WithdrawalCommand}"
-                            Foreground="{DynamicResource WarnBrush}" ToolTip="Retirada de dinheiro do caixa; o proprietário é avisado"/>
-                </UniformGrid>
-                <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE895;" Content="Sincronizar agora" Command="{Binding SyncCommand}"/>
             </StackPanel>
             </ScrollViewer>
         </Border>

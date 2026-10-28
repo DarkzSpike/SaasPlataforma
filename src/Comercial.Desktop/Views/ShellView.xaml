@@ -13,12 +13,15 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE7BF;" FontSize="50" Foreground="{DynamicResource AccentBrush}" Margin="0,0,18,0"/>
+                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE7BF;" FontSize="50" Foreground="{DynamicResource AccentBrush}" Margin="0,0,18,0"
+                                   Visibility="{DynamicResource NoLogoOnDark}"/>
+                        <Image Source="{DynamicResource LogoOnDark}" MaxHeight="60" MaxWidth="180" Stretch="Uniform" Margin="0,0,18,0" VerticalAlignment="Center"
+                               Visibility="{DynamicResource HasLogoOnDark}" RenderOptions.BitmapScalingMode="HighQuality"/>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock FontSize="34" FontWeight="Bold">
                                 <Run Text="{DynamicResource BrandFirst}" Foreground="White"/><Run Text="{DynamicResource BrandLast}" Foreground="{DynamicResource AccentBrush}"/>
                             </TextBlock>
-                            <TextBlock Text="Mais praticidade para o seu negócio" Foreground="{DynamicResource MutedBrush}" FontSize="17" Margin="0,-2,0,0"/>
+                            <TextBlock Text="{DynamicResource HeaderSubtitle}" Foreground="{DynamicResource MutedBrush}" FontSize="17" Margin="0,-2,0,0"/>
                         </StackPanel>
                     </StackPanel>
 
@@ -156,6 +159,10 @@
                                Visibility="{Binding PointsText, Converter={StaticResource Vis}}"/>
                     <Button Style="{StaticResource PrimaryButton}" local:Ui.Icon="&#xE73E;" Content="{Binding ConfirmText}" Height="58" FontSize="18" Margin="0,24,0,0"
                             Command="{Binding ConfirmCommand}" IsDefault="True"/>
+                    <TextBlock Text="{Binding FiscalText}" Foreground="{DynamicResource TextBrush}" FontSize="14" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                               Margin="0,12,0,0" MaxWidth="440" Visibility="{Binding HasFiscalText, Converter={StaticResource Vis}}"/>
+                    <Button Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE749;" Content="Imprimir NFC-e (DANFE)" Margin="0,10,0,0"
+                            Command="{Binding PrintDanfeCommand}" Visibility="{Binding CanPrintDanfe, Converter={StaticResource Vis}}"/>
                     <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE749;" Content="Imprimir comprovante" Margin="0,10,0,0"
                             Command="{Binding PrintCommand}" Visibility="{Binding CanPrint, Converter={StaticResource Vis}}"/>
                     <TextBlock Text="Pressione Enter para confirmar" Style="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,10,0,0"/>
@@ -191,7 +198,10 @@
                                         <TextBlock Text="{Binding Label}" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6"/>
                                         <TextBox Style="{StaticResource DarkInput}" Height="42" local:Ui.Icon="{Binding Icon}" local:Ui.Placeholder="{Binding Placeholder}"
                                                  Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Label}"
+                                                 IsReadOnly="{Binding IsReadOnly}"
                                                  Visibility="{Binding IsText, Converter={StaticResource Vis}}"/>
+                                        <TextBlock Text="{Binding Note}" Foreground="{DynamicResource AccentBrush}" FontSize="13" Margin="2,4,0,0" TextWrapping="Wrap"
+                                                   Visibility="{Binding HasNote, Converter={StaticResource Vis}}"/>
                                         <ComboBox Style="{StaticResource DarkCombo}" Height="42" ItemsSource="{Binding Options}" SelectedItem="{Binding Value}"
                                                   AutomationProperties.Name="{Binding Label}" Visibility="{Binding IsChoice, Converter={StaticResource Vis}}">
                                             <ComboBox.ItemTemplate>

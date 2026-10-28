@@ -1,8 +1,14 @@
 ﻿# Ativa na empresa de demonstração TODOS os módulos que existem de verdade (status Beta ou Disponível)
 # e publica a identidade visual "Demo PDV". Módulos "Planejados" não são ativados: o servidor recusa,
 # porque ainda não têm funcionalidade. Requer a API local rodando (dev/run-api.ps1).
+# Outra empresa de teste: -TenantCode exemplo -OwnerEmail exemplo@gmail.com -OwnerPassword exemplo123 -TradeName "Exemplo"
+param([string]$TenantCode, [string]$OwnerEmail, [string]$OwnerPassword, [string]$TradeName)
 $ErrorActionPreference = 'Stop'
 $s = Get-Content (Join-Path $PSScriptRoot 'dev-secrets.local.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $TenantCode) { $TenantCode = $TenantCode }
+if (-not $OwnerEmail) { $OwnerEmail = $OwnerEmail }
+if (-not $OwnerPassword) { $OwnerPassword = $OwnerPassword }
+if (-not $TradeName) { $TradeName = 'Loja Demo' }
 $base = 'http://localhost:5080'
 $json = 'application/json; charset=utf-8'
 function Body($o) { , [Text.Encoding]::UTF8.GetBytes(($o | ConvertTo-Json -Depth 6)) }
@@ -15,8 +21,8 @@ foreach ($off in 0, 1) {
   catch { if ($off -eq 1) { throw "Login do admin falhou: $($_.Exception.Message)" } }
 }
 $h = @{ Authorization = "Bearer $admin" }
-$tenant = (Invoke-RestMethod "$base/admin/v1/tenants?q=$($s.DemoTenantCode)" -Headers $h) | Where-Object { $_.code -eq $s.DemoTenantCode } | Select-Object -First 1
-if (-not $tenant) { throw "Empresa $($s.DemoTenantCode) não encontrada." }
+$tenant = (Invoke-RestMethod "$base/admin/v1/tenants?q=$($TenantCode)" -Headers $h) | Where-Object { $_.code -eq $TenantCode } | Select-Object -First 1
+if (-not $tenant) { throw "Empresa $($TenantCode) não encontrada." }
 $detail = Invoke-RestMethod "$base/admin/v1/tenants/$($tenant.id)" -Headers $h
 $enabled = @($detail.modules | Where-Object { $_.enabled } | ForEach-Object { $_.moduleKey })
 $catalog = Invoke-RestMethod "$base/admin/v1/modules" -Headers $h
@@ -39,7 +45,7 @@ Write-Output "Módulos ativos: $($enabled.Count + 1) (inclui o núcleo). Planeja
 
 # Identidade visual da demonstração (verde + azul, tema escuro na operação).
 $draft = Invoke-RestMethod "$base/admin/v1/tenants/$($tenant.id)/branding/draft" -Headers $h
-$draft.systemName = 'Demo PDV'; $draft.companyName = 'Loja Demo'; $draft.welcomeMessage = 'Bem-vindo!'
+$draft.systemName = 'Demo PDV'; $draft.companyName = $TradeName; $draft.welcomeMessage = 'Bem-vindo!'
 $draft.primaryColor = '#12A86B'; $draft.accentColor = '#1E8CFF'; $draft.secondaryColor = '#0F2A5C'
 $draft.backgroundColor = '#EEF3F1'; $draft.surfaceColor = '#FFFFFF'; $draft.textColor = '#111827'; $draft.borderColor = '#D7DEE3'
 $draft.darkBackgroundColor = '#0B1426'; $draft.darkSurfaceColor = '#111D33'; $draft.darkTextColor = '#E8ECF2'

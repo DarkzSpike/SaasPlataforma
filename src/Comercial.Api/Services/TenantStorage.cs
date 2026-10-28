@@ -6,6 +6,8 @@ using Comercial.Api.Security;
 using Comercial.Domain;
 using Comercial.Infrastructure.Data;
 using Google.Apis.Auth.OAuth2;
+using Google.Apis.Auth.OAuth2.Flows;
+using Google.Apis.Auth.OAuth2.Responses;
 using Google.Apis.Drive.v3;
 using Google.Apis.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -32,6 +34,8 @@ public interface IDriveGateway
     Task<DriveFolderInfo> GetFolderAsync(DriveTarget target, CancellationToken ct);
     Task<string> UploadAsync(DriveTarget target, string name, byte[] bytes, string contentType, IDictionary<string, string> appProperties, CancellationToken ct);
     Task<(byte[] Bytes, IDictionary<string, string>? AppProperties)?> DownloadAsync(DriveTarget target, string fileId, CancellationToken ct);
+    /// <summary>Cria uma pasta na raiz do "Meu Drive" da conta conectada e devolve o ID.</summary>
+    Task<string> CreateFolderAsync(string credentialsJson, string name, CancellationToken ct);
 }
 
 public sealed class GoogleDriveGateway : IDriveGateway
@@ -39,12 +43,43 @@ public sealed class GoogleDriveGateway : IDriveGateway
     // Um cliente por empresa e versão da configuração: trocar a credencial no painel gera cliente novo.
     private readonly ConcurrentDictionary<(Guid, int), DriveService> _clients = new();
 
-    private DriveService Client(DriveTarget t) => _clients.GetOrAdd((t.TenantId, t.Version), _ =>
+    private DriveService Client(DriveTarget t) => _clients.GetOrAdd((t.TenantId, t.Version), _ => Service(t.CredentialsJson, t.ImpersonateUser));
+
+    /// <summary>
+    /// Conta de serviço (Drive compartilhado do Workspace) ou conta Google pessoal conectada pelo painel
+    /// ("authorized_user": refresh token do OAuth, escopo drive.file — só enxerga o que o sistema criou).
+    /// </summary>
+    private static DriveService Service(string json, string? impersonate)
     {
-        var credential = CredentialFactory.FromJson<ServiceAccountCredential>(t.CredentialsJson).ToGoogleCredential().CreateScoped(DriveService.Scope.Drive);
-        if (!string.IsNullOrWhiteSpace(t.ImpersonateUser)) credential = credential.CreateWithUser(t.ImpersonateUser);
+        Google.Apis.Http.IConfigurableHttpClientInitializer credential;
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var r = doc.RootElement;
+            if (r.GetProperty("type").GetString() == "authorized_user")
+            {
+                var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+                {
+                    ClientSecrets = new ClientSecrets { ClientId = r.GetProperty("client_id").GetString(), ClientSecret = r.GetProperty("client_secret").GetString() },
+                    Scopes = [DriveService.Scope.DriveFile],
+                });
+                credential = new UserCredential(flow, "owner", new TokenResponse { RefreshToken = r.GetProperty("refresh_token").GetString() });
+            }
+            else
+            {
+                var sa = CredentialFactory.FromJson<ServiceAccountCredential>(json).ToGoogleCredential().CreateScoped(DriveService.Scope.Drive);
+                credential = string.IsNullOrWhiteSpace(impersonate) ? sa : sa.CreateWithUser(impersonate);
+            }
+        }
         return new DriveService(new BaseClientService.Initializer { HttpClientInitializer = credential, ApplicationName = "comercial-saas" });
-    });
+    }
+
+    public async Task<string> CreateFolderAsync(string credentialsJson, string name, CancellationToken ct)
+    {
+        using var svc = Service(credentialsJson, null);
+        var create = svc.Files.Create(new DriveFile { Name = name, MimeType = "application/vnd.google-apps.folder" });
+        create.Fields = "id";
+        return (await create.ExecuteAsync(ct)).Id;
+    }
 
     public async Task<DriveFolderInfo> GetFolderAsync(DriveTarget target, CancellationToken ct)
     {
@@ -101,17 +136,27 @@ public sealed partial class TenantStorageService(AppDbContext db, AuditService a
         return FolderIdRx().IsMatch(s) ? s : throw new DomainException("invalid_folder", "Informe o link ou o ID da pasta do Google Drive.");
     }
 
-    /// <summary>Confere que é uma conta de serviço do Google (recusa outros tipos de credencial) e devolve o e-mail.</summary>
+    /// <summary>Confere a credencial (conta de serviço ou conta Google conectada) e devolve o e-mail.</summary>
     public static string ValidateCredentials(string json)
     {
         if (json.Length > MaxCredentialBytes) throw new DomainException("invalid_credentials", "Arquivo de credencial grande demais.");
+        // Chave de API ("AIza..."): o Google não deixa gravar no Drive com ela, só ler o que é público.
+        if (json.TrimStart().StartsWith("AIza", StringComparison.Ordinal))
+            throw new DomainException("api_key_not_supported",
+                "Isso é uma chave de API do Google: com ela o Google não permite gravar arquivos no Drive. Use o botão \"Conectar minha conta Google\" (aba Google: só Client ID e segredo).");
         try
         {
             using var doc = JsonDocument.Parse(json);
             var r = doc.RootElement;
             string? Str(string name) => r.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            if (Str("type") == "authorized_user")
+            {
+                if (string.IsNullOrWhiteSpace(Str("client_id")) || string.IsNullOrWhiteSpace(Str("client_secret")) || string.IsNullOrWhiteSpace(Str("refresh_token")))
+                    throw new DomainException("invalid_credentials", "Credencial da conta Google incompleta. Conecte a conta de novo.");
+                return Str("email") ?? "conta Google";
+            }
             if (Str("type") != "service_account")
-                throw new DomainException("invalid_credentials", "Use o JSON de uma conta de serviço do Google (\"type\": \"service_account\").");
+                throw new DomainException("invalid_credentials", "Use o JSON de uma conta de serviço do Google (\"type\": \"service_account\") ou o botão \"Conectar minha conta Google\".");
             var email = Str("client_email");
             var key = Str("private_key");
             if (string.IsNullOrWhiteSpace(email) || !MailAddress.TryCreate(email, out _) || string.IsNullOrWhiteSpace(key) || !key.Contains("PRIVATE KEY"))
@@ -191,7 +236,7 @@ public sealed partial class TenantStorageService(AppDbContext db, AuditService a
             {
                 var f = await drive.GetFolderAsync(TargetOf(s), ct);
                 (ok, message) = !f.IsFolder ? (false, "O ID informado não é uma pasta.")
-                    : !f.CanAddChildren ? (false, $"A conta de serviço não pode gravar na pasta \"{f.Name}\". Compartilhe a pasta com {s.CredentialsClientEmail} como Editor.")
+                    : !f.CanAddChildren ? (false, $"A conta {s.CredentialsClientEmail} não pode gravar na pasta \"{f.Name}\". Compartilhe a pasta com ela como Editor.")
                     : (true, $"Conectado à pasta \"{f.Name}\".");
             }
             catch (Exception ex) when (ex is not DomainException and not OperationCanceledException)
@@ -205,6 +250,28 @@ public sealed partial class TenantStorageService(AppDbContext db, AuditService a
         s.LastTestAt = DateTimeOffset.UtcNow; s.LastTestOk = ok; s.LastTestMessage = message;
         audit.Add("tenant.storage_tested", tenantId, nameof(TenantStorageSettings), tenantId, new { ok, message });
         await db.SaveChangesAsync(ct);
+        return View(s);
+    }
+
+    /// <summary>
+    /// Conta Google pessoal conectada pelo OAuth: grava a credencial (criptografada) e a pasta criada no Drive do dono.
+    /// Chamado pelo retorno do Google, depois de validar o "state" assinado.
+    /// </summary>
+    public async Task<StorageSettingsView> ConnectGoogleAccountAsync(Guid tenantId, Guid? adminId, string credentialsJson, string email, string folderId)
+    {
+        var s = await FindAsync(tenantId);
+        if (s is null) { s = new TenantStorageSettings { TenantId = tenantId }; db.StorageSettings.Add(s); }
+        s.Provider = "gdrive";
+        s.CredentialsProtected = Protector.Protect(credentialsJson);
+        s.CredentialsClientEmail = email;
+        s.DriveFolderId = folderId;
+        s.ImpersonateUser = null;
+        s.Version++;
+        s.UpdatedAt = DateTimeOffset.UtcNow;
+        s.UpdatedByAdminId = adminId;
+        s.LastTestAt = DateTimeOffset.UtcNow; s.LastTestOk = true; s.LastTestMessage = $"Conta {email} conectada; pasta criada no Google Drive.";
+        audit.Add("tenant.storage_google_connected", tenantId, nameof(TenantStorageSettings), tenantId, new { email, folderId, version = s.Version });
+        await db.SaveChangesAsync();
         return View(s);
     }
 

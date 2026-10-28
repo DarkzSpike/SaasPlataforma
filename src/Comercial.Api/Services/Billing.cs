@@ -95,6 +95,105 @@ public sealed class PlatformSettingsService(AppDbContext db, IDataProtectionProv
         await db.SaveChangesAsync();
     }
 
+    // ---------- App do Google (OAuth) para conectar o Google Drive pessoal ----------
+    public const string GoogleClientId = "google.oauth.client_id", GoogleClientSecret = "google.oauth.client_secret";
+    public sealed record GoogleOAuthConfig(string ClientId, string ClientSecret);
+
+    public async Task<GoogleOAuthConfig?> GoogleOAuthAsync()
+    {
+        var id = await GetAsync(GoogleClientId);
+        var secret = await GetAsync(GoogleClientSecret);
+        return string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(secret) ? null : new(id, secret);
+    }
+
+    public async Task SaveGoogleOAuthAsync(GoogleOAuthSettingsRequest r)
+    {
+        var id = (r.ClientId ?? "").Trim();
+        if (!id.EndsWith(".apps.googleusercontent.com") || id.Length > 200) throw new DomainException("invalid_client_id", "Client ID inválido (termina com .apps.googleusercontent.com).");
+        await SetAsync(GoogleClientId, id, false);
+        if (!string.IsNullOrWhiteSpace(r.ClientSecret))
+        {
+            if (r.ClientSecret.Trim().Length is < 10 or > 200) throw new DomainException("invalid_client_secret", "Segredo do cliente inválido.");
+            await SetAsync(GoogleClientSecret, r.ClientSecret.Trim(), true);
+        }
+        audit.Add("platform.google_oauth_updated", null, nameof(PlatformSetting), "google", new { clientId = id, secretChanged = !string.IsNullOrWhiteSpace(r.ClientSecret) });
+        await db.SaveChangesAsync();
+    }
+
+    // ---------- WhatsApp de atendimento (botão flutuante no caixa) ----------
+    public const string SupportWhatsapp = "support.whatsapp", SupportWhatsappMessage = "support.whatsapp_message";
+    public const string DefaultWhatsapp = "5547992841812", DefaultWhatsappMessage = "Olá! Preciso de ajuda com o sistema.";
+    public sealed record SupportContact(string Whatsapp, string Message, bool Enabled);
+
+    public async Task<SupportContact> SupportContactAsync()
+    {
+        var n = await GetAsync(SupportWhatsapp);
+        return new(n ?? DefaultWhatsapp, await GetAsync(SupportWhatsappMessage) ?? DefaultWhatsappMessage, n != "");
+    }
+
+    /// <summary>Aceita o número com ou sem DDI/formatação: (47) 99284-1812 vira 5547992841812. Em branco desliga o botão.</summary>
+    public static string NormalizeWhatsapp(string? raw)
+    {
+        var d = new string((raw ?? "").Where(char.IsDigit).ToArray());
+        if (d.Length == 0) return "";
+        if (d.Length is 10 or 11) d = "55" + d;
+        if (d.Length is < 12 or > 15) throw new DomainException("invalid_phone", "Número inválido. Use DDD + número, ex.: (47) 99284-1812.");
+        return d;
+    }
+
+    public async Task SaveSupportContactAsync(SupportContactRequest r)
+    {
+        var n = NormalizeWhatsapp(r.Whatsapp);
+        var msg = (r.Message ?? "").Trim();
+        if (msg.Length > 300) throw new DomainException("invalid_message", "Mensagem com até 300 caracteres.");
+        await SetAsync(SupportWhatsapp, n, false);
+        await SetAsync(SupportWhatsappMessage, msg.Length == 0 ? null : msg, false);
+        audit.Add("platform.support_contact_updated", null, nameof(PlatformSetting), "support", new { whatsapp = n });
+        await db.SaveChangesAsync();
+    }
+
+    // ---------- Versão do app Android (aviso de atualização no celular) ----------
+    public const string MobileVersionCode = "mobile.version_code", MobileVersionName = "mobile.version_name", MobileUrl = "mobile.url", MobileNotes = "mobile.notes", MobileMandatory = "mobile.mandatory";
+    public sealed record MobileRelease(int VersionCode, string VersionName, string Url, string? Notes, bool Mandatory);
+
+    public async Task<MobileRelease?> MobileReleaseAsync()
+    {
+        var code = await GetAsync(MobileVersionCode);
+        var url = await GetAsync(MobileUrl);
+        if (code is null || url is null || !int.TryParse(code, out var c)) return null;
+        return new(c, await GetAsync(MobileVersionName) ?? code, url, await GetAsync(MobileNotes), await GetAsync(MobileMandatory) == "true");
+    }
+
+    /// <summary>
+    /// Publica a versão do APK. Em produção o endereço precisa ser HTTPS; em desenvolvimento aceita o IP da rede local
+    /// (o próprio servidor entrega o arquivo em /downloads). O Android só instala por cima se o APK tiver a mesma assinatura.
+    /// </summary>
+    public async Task SaveMobileReleaseAsync(MobileReleaseRequest r, bool development)
+    {
+        if (r.VersionCode is < 1 or > 2_000_000_000) throw new DomainException("invalid_version", "Número da versão (versionCode) inválido.");
+        var name = (r.VersionName ?? "").Trim();
+        if (name.Length is 0 or > 30) throw new DomainException("invalid_version", "Versão no formato 1.0.3.");
+        var url = (r.Url ?? "").Trim();
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || !(u.Scheme == Uri.UriSchemeHttps || (development && u.Scheme == Uri.UriSchemeHttp && IsLocalHost(u))))
+            throw new DomainException("invalid_url", "O APK precisa estar num endereço HTTPS (ex.: GitHub Releases).");
+        await SetAsync(MobileVersionCode, r.VersionCode.ToString(), false);
+        await SetAsync(MobileVersionName, name, false);
+        await SetAsync(MobileUrl, url, false);
+        await SetAsync(MobileNotes, string.IsNullOrWhiteSpace(r.Notes) ? null : r.Notes.Trim()[..Math.Min(r.Notes.Trim().Length, 500)], false);
+        await SetAsync(MobileMandatory, r.Mandatory ? "true" : "false", false);
+        audit.Add("platform.mobile_release", null, nameof(PlatformSetting), "mobile", new { r.VersionCode, name, url, r.Mandatory });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>localhost ou IP de rede privada (192.168.x, 10.x, 172.16-31.x).</summary>
+    public static bool IsLocalHost(Uri u)
+    {
+        if (u.IsLoopback) return true;
+        if (!System.Net.IPAddress.TryParse(u.Host, out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+        var b = ip.GetAddressBytes();
+        return b[0] == 10 || (b[0] == 192 && b[1] == 168) || (b[0] == 172 && b[1] >= 16 && b[1] <= 31);
+    }
+
     // ---------- Versão do caixa (atualização automática) ----------
     public const string DesktopVersion = "desktop.version", DesktopUrl = "desktop.url", DesktopSha = "desktop.sha256", DesktopNotes = "desktop.notes", DesktopMandatory = "desktop.mandatory";
     public sealed record DesktopRelease(string Version, string Url, string Sha256, string? Notes, bool Mandatory);
@@ -354,7 +453,15 @@ public sealed class MercadoPagoClient(HttpClient http, ILogger<MercadoPagoClient
 // ============================== Faturas ==============================
 
 public sealed record InvoiceView(Guid Id, long AmountCents, DateTimeOffset DueAt, DateTimeOffset PeriodStart, DateTimeOffset PeriodEnd, string Status,
-    DateTimeOffset? PaidAt, string? PaidMethod, bool Overdue, int DaysToDue, string? PixCopyPaste, string? PixQrBase64, DateTimeOffset? PixExpiresAt, string? CheckoutUrl);
+    DateTimeOffset? PaidAt, string? PaidMethod, bool Overdue, int DaysToDue, string? PixCopyPaste, string? PixQrBase64, DateTimeOffset? PixExpiresAt, string? CheckoutUrl)
+{
+    /// <summary>"Gerar fatura agora": true quando já havia fatura em aberto do período (nada foi criado).</summary>
+    public bool AlreadyExisted { get; init; }
+}
+
+public sealed record CreateInvoiceRequest(int? DueInDays, DateOnly? DueDate = null, long? AmountCents = null, bool Notify = true);
+public sealed record EditInvoiceRequest(DateOnly? DueDate, long? AmountCents, string ConfirmTenantCode, string Reason);
+public sealed record BillingDateRequest(DateOnly NextDueDate, string ConfirmTenantCode, string Reason);
 
 public sealed class BillingService(AppDbContext db, AuditService audit, RequestActor actor, PlatformSettingsService settings, IMercadoPagoClient mp,
     NotificationService notifications, TimeProvider clock, IConfiguration config, ILogger<BillingService> log, EmailService email, NfseService nfse)
@@ -444,18 +551,20 @@ public sealed class BillingService(AppDbContext db, AuditService audit, RequestA
     };
 
     /// <summary>Painel: garante a fatura do período atual (não duplica se já existir).</summary>
-    public async Task<Invoice> EnsureCurrentInvoiceAsync(Guid tenantId, int dueInDays)
+    public async Task<Invoice> EnsureCurrentInvoiceAsync(Guid tenantId, int dueInDays) => (await EnsureCoreAsync(tenantId, dueInDays)).Invoice;
+
+    private async Task<(Invoice Invoice, bool Created)> EnsureCoreAsync(Guid tenantId, int dueInDays)
     {
         var sub = await db.Subscriptions.IgnoreQueryFilters().Where(s => s.TenantId == tenantId && s.Status != SubscriptionStatus.Cancelled)
                       .OrderByDescending(s => s.StartedAt).FirstOrDefaultAsync() ?? throw new DomainException("no_subscription", "Empresa sem assinatura.", 404);
         var existing = await db.Invoices.IgnoreQueryFilters().FirstOrDefaultAsync(i => i.TenantId == tenantId && i.SubscriptionId == sub.Id
             && i.PeriodStart == sub.CurrentPeriodEnd && i.Status != InvoiceStatus.Void);
-        if (existing is not null) return existing;
+        if (existing is not null) return (existing, false);
         var inv = NewInvoice(sub, sub.CurrentPeriodEnd, "manual", clock.GetUtcNow().AddDays(Math.Clamp(dueInDays, 0, 60)));
         db.Invoices.Add(inv);
         audit.Add("invoice.created", tenantId, nameof(Invoice), inv.Id, new { inv.AmountCents, inv.DueAt });
         await db.SaveChangesAsync();
-        return inv;
+        return (inv, true);
     }
 
     // ---------------- Pagamento pelo cliente ----------------
@@ -622,6 +731,126 @@ public sealed class BillingService(AppDbContext db, AuditService audit, RequestA
             r.Id, r.TenantId, r.Code, r.TradeName, r.AmountCents, r.DueAt, r.Origin, r.ReminderSentAt, r.hasPix, r.hasCheckout,
             overdue = r.DueAt < now, daysToDue = (int)Math.Ceiling((r.DueAt - now).TotalDays),
         });
+    }
+
+    // ---------------- Ajustes pelo painel (editar, cancelar, dia de cobrança, gerar agora) ----------------
+
+    /// <summary>Data do painel (dia) vira 12h no horário de Brasília, para não "mudar de dia" na conversão de fuso.</summary>
+    public static DateTimeOffset DueAtOf(DateOnly d) => new(d.ToDateTime(new TimeOnly(12, 0)), TimeSpan.FromHours(-3));
+    private DateOnly TodayBr => DateOnly.FromDateTime(clock.GetUtcNow().ToOffset(TimeSpan.FromHours(-3)).DateTime);
+
+    private async Task<(Invoice Inv, Tenant Tenant)> AdminInvoiceAsync(Guid invoiceId, string confirmTenantCode, string? reason)
+    {
+        var inv = await db.Invoices.IgnoreQueryFilters().FirstOrDefaultAsync(i => i.Id == invoiceId) ?? throw new DomainException("not_found", "Fatura não encontrada.", 404);
+        var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == inv.TenantId);
+        if (confirmTenantCode != tenant.Code) throw new DomainException("confirmation_mismatch", "Código de confirmação não confere.", 409);
+        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 5) throw new DomainException("reason_required", "Informe o motivo (fica na auditoria).");
+        if (inv.Status != InvoiceStatus.Open) throw new DomainException("invoice_not_open", "Só dá para alterar fatura em aberto.", 409);
+        return (inv, tenant);
+    }
+
+    /// <summary>
+    /// Invalida o PIX e o link de pagamento já gerados (valor ou prazo mudaram): o PIX é cancelado no Mercado Pago
+    /// e um pagamento antigo que ainda chegar não baixa a fatura (o valor é conferido).
+    /// </summary>
+    private async Task ClearChargesAsync(Invoice inv, CancellationToken ct = default)
+    {
+        if (inv.MpPaymentId is { } pid && await settings.MercadoPagoAsync() is { } cfg)
+        {
+            try { await mp.CancelPaymentAsync(cfg.AccessToken, pid, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Não foi possível cancelar o PIX {Payment} no Mercado Pago", pid); }
+        }
+        inv.MpPaymentId = null; inv.PixCopyPaste = null; inv.PixQrBase64 = null; inv.PixExpiresAt = null;
+        inv.CheckoutPreferenceId = null; inv.CheckoutUrl = null;
+    }
+
+    public async Task<InvoiceView> EditInvoiceAsync(Guid invoiceId, EditInvoiceRequest r)
+    {
+        var (inv, _) = await AdminInvoiceAsync(invoiceId, r.ConfirmTenantCode, r.Reason);
+        if (r.DueDate is null && r.AmountCents is null) throw new DomainException("nothing_to_change", "Informe o novo vencimento e/ou o novo valor.");
+        if (r.AmountCents is { } a && (a <= 0 || a > 100_000_000)) throw new DomainException("invalid_amount", "Valor inválido.");
+        if (r.DueDate is { } d && (d < TodayBr || d > TodayBr.AddDays(400))) throw new DomainException("invalid_due_date", "O vencimento precisa ser de hoje em diante (até 400 dias).");
+        var before = new { inv.AmountCents, inv.DueAt };
+        if (r.AmountCents is { } amount) inv.AmountCents = amount;
+        if (r.DueDate is { } due)
+        {
+            var newDue = DueAtOf(due);
+            if (newDue > inv.DueAt) inv.ReminderSentAt = null; // novo lembrete perto do novo vencimento
+            inv.DueAt = newDue;
+        }
+        await ClearChargesAsync(inv);
+        audit.Add("invoice.edited", inv.TenantId, nameof(Invoice), inv.Id, new { before, after = new { inv.AmountCents, inv.DueAt }, reason = r.Reason.Trim() });
+        await db.SaveChangesAsync();
+        var when = inv.DueAt.ToOffset(TimeSpan.FromHours(-3)).ToString("dd/MM/yyyy");
+        await notifications.CreateAsync(inv.TenantId, "invoice.changed", $"Fatura atualizada: {Brl(inv.AmountCents)}",
+            $"Sua fatura do sistema agora vence em {when}. Pague por PIX, boleto ou cartão em Faturas.", new { invoiceId = inv.Id, inv.AmountCents, inv.DueAt });
+        await EmailOwnersAsync(inv.TenantId, $"Fatura atualizada: {Brl(inv.AmountCents)}", "Fatura atualizada",
+            $"Sua fatura do sistema agora é de {Brl(inv.AmountCents)} com vencimento em {when}. Se você já tinha gerado um PIX dessa fatura, gere de novo em Faturas.", "invoice_changed");
+        return View(inv);
+    }
+
+    public async Task<InvoiceView> CancelInvoiceAsync(Guid invoiceId, string confirmTenantCode, string reason)
+    {
+        var (inv, _) = await AdminInvoiceAsync(invoiceId, confirmTenantCode, reason);
+        await ClearChargesAsync(inv);
+        inv.Status = InvoiceStatus.Void;
+        audit.Add("invoice.cancelled", inv.TenantId, nameof(Invoice), inv.Id, new { inv.AmountCents, inv.DueAt, reason = reason.Trim() });
+        await db.SaveChangesAsync();
+        return View(inv);
+    }
+
+    /// <summary>
+    /// Muda o próximo vencimento da assinatura: daí em diante as cobranças seguem esse dia (cada período soma 1 mês/ano).
+    /// A fatura em aberto do próximo período acompanha a nova data.
+    /// </summary>
+    public async Task<object> SetNextBillingDateAsync(Guid tenantId, BillingDateRequest r)
+    {
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId) ?? throw new DomainException("not_found", "Empresa não encontrada.", 404);
+        if (r.ConfirmTenantCode != tenant.Code) throw new DomainException("confirmation_mismatch", "Código de confirmação não confere.", 409);
+        if (string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Trim().Length < 5) throw new DomainException("reason_required", "Informe o motivo (fica na auditoria).");
+        if (r.NextDueDate < TodayBr || r.NextDueDate > TodayBr.AddDays(400)) throw new DomainException("invalid_due_date", "A data precisa ser de hoje em diante (até 400 dias).");
+        var sub = await db.Subscriptions.IgnoreQueryFilters().Where(s => s.TenantId == tenantId && s.Status != SubscriptionStatus.Cancelled)
+                      .OrderByDescending(s => s.StartedAt).FirstOrDefaultAsync() ?? throw new DomainException("no_subscription", "Empresa sem assinatura.", 404);
+        var oldEnd = sub.CurrentPeriodEnd;
+        var newEnd = DueAtOf(r.NextDueDate);
+        var open = await db.Invoices.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.SubscriptionId == sub.Id && i.PeriodStart == oldEnd && i.Status == InvoiceStatus.Open);
+        sub.CurrentPeriodEnd = newEnd;
+        if (open is not null)
+        {
+            open.PeriodStart = newEnd; open.PeriodEnd = newEnd.AddMonths((int)sub.Period); open.DueAt = newEnd; open.ReminderSentAt = null;
+            await ClearChargesAsync(open);
+        }
+        audit.Add("subscription.billing_date_changed", tenantId, nameof(Subscription), sub.Id,
+            new { from = oldEnd, to = newEnd, invoiceMoved = open?.Id, reason = r.Reason.Trim() });
+        await db.SaveChangesAsync();
+        return new { currentPeriodEnd = sub.CurrentPeriodEnd, day = r.NextDueDate.Day, invoiceMoved = open is not null };
+    }
+
+    /// <summary>
+    /// "Gerar fatura agora" (painel, também serve para testar): cria a fatura do próximo período mesmo longe do vencimento,
+    /// com o vencimento e o valor escolhidos, e avisa o cliente como na geração automática. Não duplica.
+    /// </summary>
+    public async Task<InvoiceView> CreateNowAsync(Guid tenantId, CreateInvoiceRequest r)
+    {
+        if (r.AmountCents is { } a && (a <= 0 || a > 100_000_000)) throw new DomainException("invalid_amount", "Valor inválido.");
+        if (r.DueDate is { } d && (d < TodayBr || d > TodayBr.AddDays(400))) throw new DomainException("invalid_due_date", "O vencimento precisa ser de hoje em diante (até 400 dias).");
+        var (inv, created) = await EnsureCoreAsync(tenantId, r.DueInDays ?? 5);
+        if (!created) return View(inv) with { AlreadyExisted = true }; // não duplica: o painel avisa e oferece "Editar"
+        if (r.DueDate is { } due) inv.DueAt = DueAtOf(due);
+        if (r.AmountCents is { } amount) inv.AmountCents = amount;
+        if (r.Notify)
+        {
+            await notifications.CreateAsync(tenantId, "invoice.available", $"Nova fatura: {Brl(inv.AmountCents)}",
+                $"Sua fatura do sistema vence em {inv.DueAt.ToOffset(TimeSpan.FromHours(-3)):dd/MM/yyyy}. Pague por PIX, boleto ou cartão em Faturas.",
+                new { invoiceId = inv.Id, inv.AmountCents, inv.DueAt });
+            inv.AvailableNotifiedAt = clock.GetUtcNow();
+        }
+        await db.SaveChangesAsync();
+        if (r.Notify)
+            await EmailOwnersAsync(tenantId, $"Nova fatura do sistema: {Brl(inv.AmountCents)}", "Nova fatura disponível",
+                $"Sua fatura de {Brl(inv.AmountCents)} vence em {inv.DueAt.ToOffset(TimeSpan.FromHours(-3)):dd/MM/yyyy}. Pague por PIX, boleto ou cartão no menu Faturas do sistema.", "invoice_available");
+        return View(inv);
     }
 
     public async Task<Invoice> MarkPaidManuallyAsync(Guid invoiceId, string confirmTenantCode, string reason)

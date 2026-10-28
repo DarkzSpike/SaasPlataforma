@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTP sem criptografia fica liberado no sistema para o teste na rede local (IP do computador, ex.: 192.168.x.x:5080).
+  O próprio app recusa HTTP fora da rede local (ServerConfig.isAllowed): na internet, só HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

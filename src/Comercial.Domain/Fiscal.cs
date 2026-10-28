@@ -32,6 +32,43 @@ public class TenantFiscalProfile : ITenantScoped
     public decimal IbsRate { get; set; } = 0.1m;
     public decimal CbsRate { get; set; } = 0.9m;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    // ----- Emissão direta na SEFAZ (Provider = "sefaz", sem provedor pago) -----
+    public string LegalName { get; set; } = "";
+    public string? TradeName { get; set; }
+    public string Street { get; set; } = "";
+    public string AddressNumber { get; set; } = "";
+    public string District { get; set; } = "";
+    /// <summary>Código IBGE do município (7 dígitos).</summary>
+    public int CityCode { get; set; }
+    public string CityName { get; set; } = "";
+    public string Cep { get; set; } = "";
+    public string? Phone { get; set; }
+    /// <summary>Certificado A1 (.pfx) criptografado no servidor; a senha também. Nunca devolvidos pela API.</summary>
+    public string? CertificateProtected { get; set; }
+    public string? CertificatePasswordProtected { get; set; }
+    public string? CertificateSubject { get; set; }
+    public DateTimeOffset? CertificateNotAfter { get; set; }
+    public string? CertificateThumbprint { get; set; }
+    /// <summary>CSC (código de segurança do contribuinte) do QR Code — exigido no QR Code versão 2.</summary>
+    public string? CscId { get; set; }
+    public string? CscProtected { get; set; }
+    public int QrCodeVersion { get; set; } = 3;
+    /// <summary>Próximo número da NFC-e (a SEFAZ exige sequência sem duplicar; reservado antes de cada envio).</summary>
+    public int NfceNextNumber { get; set; } = 1;
+    /// <summary>
+    /// Quando emitir NFC-e: "sempre" (obrigado a emitir), "a_pedido" (só quando o cliente pede — ex.: MEI dispensado no estado)
+    /// ou "nunca" (só comprovante simples, não fiscal).
+    /// </summary>
+    public string EmissionMode { get; set; } = NfceModes.Always;
+}
+
+public static class NfceModes
+{
+    public const string Always = "sempre";
+    public const string OnRequest = "a_pedido";
+    public const string Never = "nunca";
+    public static readonly string[] All = [Always, OnRequest, Never];
 }
 
 /// <summary>Configuração fiscal da PLATAFORMA (você, para emitir NFS-e das mensalidades). Desligada enquanto não houver CNPJ.</summary>

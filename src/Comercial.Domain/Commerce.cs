@@ -19,6 +19,8 @@ public class Product : TenantEntity
     public string Unit { get; set; } = "UN";
     public long PriceCents { get; set; }
     public long CostCents { get; set; }
+    /// <summary>% de lucro sobre o custo usada para calcular o preço (null = preço digitado direto).</summary>
+    public decimal? MarkupPercent { get; set; }
     public decimal MinStock { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -30,6 +32,8 @@ public class Product : TenantEntity
     public Guid? ParentProductId { get; set; }
     public string? VariantLabel { get; set; }
     public bool HasVariants { get; set; }
+    /// <summary>Preço livre: o valor é digitado no caixa ("100=9,90"). Para itens não cadastrados um a um (ex.: "Diversos").</summary>
+    public bool OpenPrice { get; set; }
     /// <summary>Kit/combo: a venda baixa o estoque dos componentes, não do kit.</summary>
     public bool IsKit { get; set; }
     // Dados fiscais (vazio = usa o padrão do perfil fiscal da loja).
@@ -221,7 +225,9 @@ public enum FiscalStatus
     Rejected = 3,
     /// <summary>Emitido em contingência legal; precisa ser transmitido depois.</summary>
     Contingency = 4,
-    Cancelled = 5
+    Cancelled = 5,
+    /// <summary>Uso denegado pela SEFAZ (irregularidade cadastral): a numeração fica usada e a nota não tem validade.</summary>
+    Denied = 6
 }
 
 public class FiscalDocument : TenantEntity
@@ -248,6 +254,16 @@ public class FiscalDocument : TenantEntity
     public DateTimeOffset? NextAttemptAt { get; set; }
     public DateTimeOffset? CancelledAt { get; set; }
     public string? CancelReason { get; set; }
+    /// <summary>Link do XML do evento de cancelamento no provedor (de onde o original é baixado e arquivado).</summary>
+    public string? CancelXmlUrl { get; set; }
+    /// <summary>Tentativas de baixar os XMLs originais para o arquivo fiscal (com espera crescente).</summary>
+    public int ArchiveAttempts { get; set; }
+    public DateTimeOffset? ArchiveNextAt { get; set; }
+    /// <summary>Emissão direta: código numérico (cNF) e data/hora de emissão fixados no 1º envio, para a chave não mudar nas novas tentativas.</summary>
+    public string? NumericCode { get; set; }
+    public DateTimeOffset? EmissionAt { get; set; }
+    /// <summary>Endereço de consulta da NFC-e pela chave (impresso no DANFE).</summary>
+    public string? ConsultUrl { get; set; }
 }
 
 /// <summary>Inutilização de numeração de NFC-e (faixa que não será usada), registrada junto ao provedor/SEFAZ.</summary>
@@ -261,6 +277,9 @@ public class FiscalNumberVoid : TenantEntity
     public string? Protocol { get; set; }
     public string? Message { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? XmlUrl { get; set; }
+    public int ArchiveAttempts { get; set; }
+    public DateTimeOffset? ArchiveNextAt { get; set; }
 }
 
 public class FiscalEvent : TenantEntity

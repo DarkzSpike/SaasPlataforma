@@ -10,6 +10,7 @@ namespace Comercial.Api.Services;
 public sealed record CreateUserRequest(string Email, string DisplayName, string Password, List<string> Roles, Guid? StoreId);
 public sealed record SetRolesRequest(List<string> Roles);
 public sealed record PermissionGrantInput(string Permission, bool Granted);
+public sealed record MobileAccessRequest(bool Allowed);
 public sealed record CreateDeviceRequest(string Name, string Platform, Guid? StoreId);
 public sealed record ResetPasswordRequest(string NewPassword);
 
@@ -84,6 +85,19 @@ public sealed class UserService(AppDbContext db, RequestActor actor, AuditServic
         db.UserPermissionGrants.RemoveRange(db.UserPermissionGrants.Where(x => x.UserId == u.Id));
         foreach (var g in grants) db.UserPermissionGrants.Add(new UserPermissionGrant { UserId = u.Id, Permission = g.Permission, Granted = g.Granted });
         audit.Add("user.permissions_changed", actor.TenantId, nameof(User), u.Id, grants);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Liga/desliga só a permissão do app do celular, mantendo as demais permissões do funcionário.</summary>
+    public async Task SetMobileAccessAsync(Guid id, bool allowed)
+    {
+        var u = await GetManageableAsync(id);
+        if (u.Id == actor.UserId) throw new DomainException("self_change", "Não é possível alterar o próprio acesso.", 403);
+        if (allowed && !actor.Permissions.Contains(Permissions.MobileAccess))
+            throw new DomainException("privilege_escalation", "Não é permitido conceder permissão que você não possui.", 403);
+        db.UserPermissionGrants.RemoveRange(db.UserPermissionGrants.Where(x => x.UserId == u.Id && x.Permission == Permissions.MobileAccess));
+        db.UserPermissionGrants.Add(new UserPermissionGrant { UserId = u.Id, Permission = Permissions.MobileAccess, Granted = allowed });
+        audit.Add(allowed ? "user.mobile_access_granted" : "user.mobile_access_revoked", actor.TenantId, nameof(User), u.Id);
         await db.SaveChangesAsync();
     }
 

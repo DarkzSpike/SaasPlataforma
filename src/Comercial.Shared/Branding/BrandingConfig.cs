@@ -18,6 +18,17 @@ public sealed class BrandingConfig
     public Guid? LogoDarkAssetId { get; set; }
     public Guid? IconAssetId { get; set; }
     public Guid? SplashAssetId { get; set; }
+    /// <summary>Ilustração do lado esquerdo do login (substitui o desenho do caixa).</summary>
+    public Guid? LoginImageAssetId { get; set; }
+    /// <summary>Foto/imagem de fundo do lado esquerdo do login.</summary>
+    public Guid? LoginBackgroundAssetId { get; set; }
+    // Textos que aparecem no caixa (antes fixos no programa).
+    public string Tagline { get; set; } = "SIMPLES • RÁPIDO • EFICIENTE";
+    public string LoginSubtitle { get; set; } = "Faça login para acessar o sistema e continuar.";
+    public string HeaderSubtitle { get; set; } = "Mais praticidade para o seu negócio";
+    public string Feature1 { get; set; } = "Seus dados protegidos";
+    public string Feature2 { get; set; } = "Mais agilidade no seu dia";
+    public string Feature3 { get; set; } = "Gestão completa do seu PDV";
     public string PrimaryColor { get; set; } = "#1F5EFF";
     public string SecondaryColor { get; set; } = "#0F2A5C";
     public string AccentColor { get; set; } = "#FFB020";
@@ -97,6 +108,12 @@ public static partial class BrandingRules
         Text(nameof(c.CompanyName), c.CompanyName, 120);
         Text(nameof(c.WelcomeMessage), c.WelcomeMessage, 200);
         Text(nameof(c.ReportHeader), c.ReportHeader, 200);
+        Text(nameof(c.Tagline), c.Tagline, 60);
+        Text(nameof(c.LoginSubtitle), c.LoginSubtitle, 120);
+        Text(nameof(c.HeaderSubtitle), c.HeaderSubtitle, 80);
+        Text(nameof(c.Feature1), c.Feature1, 40);
+        Text(nameof(c.Feature2), c.Feature2, 40);
+        Text(nameof(c.Feature3), c.Feature3, 40);
         Color(nameof(c.PrimaryColor), c.PrimaryColor);
         Color(nameof(c.SecondaryColor), c.SecondaryColor);
         Color(nameof(c.AccentColor), c.AccentColor);

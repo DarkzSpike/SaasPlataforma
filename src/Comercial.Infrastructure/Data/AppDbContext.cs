@@ -69,6 +69,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     public DbSet<OperatingEvent> OperatingEvents => Set<OperatingEvent>();
     public DbSet<FiscalDocument> FiscalDocuments => Set<FiscalDocument>();
     public DbSet<FiscalEvent> FiscalEvents => Set<FiscalEvent>();
+    public DbSet<FiscalXmlFile> FiscalXmlFiles => Set<FiscalXmlFile>();
+    public DbSet<FiscalExport> FiscalExports => Set<FiscalExport>();
+    public DbSet<FiscalMonthClosing> FiscalMonthClosings => Set<FiscalMonthClosing>();
+    public DbSet<AccountantSettings> AccountantSettings => Set<AccountantSettings>();
+    public DbSet<AccountantDelivery> AccountantDeliveries => Set<AccountantDelivery>();
     public DbSet<SyncEvent> SyncEvents => Set<SyncEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<PushToken> PushTokens => Set<PushToken>();
@@ -88,7 +93,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     [
         typeof(AuditLog), typeof(StockMovement), typeof(CashMovement), typeof(OperatingEvent), typeof(SaleItem),
         typeof(SalePayment), typeof(BrandingVersion), typeof(PaymentEvent), typeof(FiscalEvent), typeof(SyncEvent),
-        typeof(LoyaltyTransaction), typeof(PurchaseReceipt), typeof(SaleReturn), typeof(SaleReturnItem)
+        typeof(LoyaltyTransaction), typeof(PurchaseReceipt), typeof(SaleReturn), typeof(SaleReturnItem), typeof(FiscalXmlFile)
     ];
 
     /// <summary>Entidades que podem mudar de estado, mas nunca ser excluídas.</summary>
@@ -96,7 +101,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     [
         typeof(Sale), typeof(FiscalDocument), typeof(CashSession), typeof(Invoice), typeof(Tenant), typeof(Subscription),
         typeof(Product), typeof(User), typeof(Device), typeof(SupportSession), typeof(StockBalance),
-        typeof(Supplier), typeof(PurchaseOrder), typeof(PurchaseItem), typeof(Customer), typeof(FinancialTitle)
+        typeof(Supplier), typeof(PurchaseOrder), typeof(PurchaseItem), typeof(Customer), typeof(FinancialTitle),
+        typeof(FiscalExport), typeof(FiscalMonthClosing), typeof(AccountantDelivery)
     ];
 
     protected override void ConfigureConventions(ModelConfigurationBuilder b)
@@ -287,6 +293,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
             e.Property(x => x.StateRegistration).HasMaxLength(20);
             e.Property(x => x.Uf).HasMaxLength(2);
             e.Property(x => x.Provider).HasMaxLength(20);
+            // Lojas que já existiam continuam emitindo sempre.
+            e.Property(x => x.EmissionMode).HasMaxLength(20).HasDefaultValue(NfceModes.Always);
             e.Property(x => x.IbsRate).HasPrecision(7, 4);
             e.Property(x => x.CbsRate).HasPrecision(7, 4);
         });
@@ -310,6 +318,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
             e.Property(x => x.Kind).HasMaxLength(40);
             e.Property(x => x.Status).HasMaxLength(20);
             e.Property(x => x.LastError).HasMaxLength(300);
+            e.Property(x => x.AttachmentPath).HasMaxLength(400);
+            e.Property(x => x.AttachmentName).HasMaxLength(200);
         });
         m.Entity<PendingSignup>(e =>
         {
@@ -417,9 +427,60 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
         {
             e.ToTable("fiscal_documents");
             e.HasIndex(x => new { x.TenantId, x.SaleId, x.Model }).IsUnique();
+            // Número da nota nunca se repete na mesma série (emissão direta reserva a numeração).
+            e.HasIndex(x => new { x.TenantId, x.Model, x.Series, x.Number }).IsUnique().HasFilter("\"Number\" IS NOT NULL");
             e.HasOne<Sale>().WithMany().HasForeignKey(x => new { x.TenantId, x.SaleId }).HasPrincipalKey(p => new { p.TenantId, p.Id }).OnDelete(DeleteBehavior.Restrict);
         });
-        m.Entity<FiscalEvent>(e => e.ToTable("fiscal_events"));
+        m.Entity<FiscalEvent>(e => { e.ToTable("fiscal_events"); e.HasIndex(x => new { x.TenantId, x.FiscalDocumentId }); });
+        // ----- Fiscal e contabilidade -----
+        m.Entity<FiscalXmlFile>(e =>
+        {
+            e.ToTable("fiscal_xml_files");
+            // Um original por documento e tipo: arquivar de novo não duplica.
+            e.HasIndex(x => new { x.TenantId, x.FiscalDocumentId, x.Kind }).IsUnique().HasFilter("\"FiscalDocumentId\" IS NOT NULL");
+            e.HasIndex(x => new { x.TenantId, x.NumberVoidId }).IsUnique().HasFilter("\"NumberVoidId\" IS NOT NULL");
+            e.HasIndex(x => new { x.TenantId, x.ReferenceAt });
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.Property(x => x.AccessKey).HasMaxLength(44);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.Source).HasMaxLength(40);
+        });
+        m.Entity<FiscalExport>(e =>
+        {
+            e.ToTable("fiscal_exports");
+            e.HasIndex(x => new { x.TenantId, x.Year, x.Month, x.CreatedAt });
+            e.Property(x => x.FileName).HasMaxLength(200);
+            e.Property(x => x.StorageName).HasMaxLength(80);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.ContentHash).HasMaxLength(64);
+            e.Property(x => x.Trigger).HasMaxLength(20);
+        });
+        m.Entity<FiscalMonthClosing>(e =>
+        {
+            e.ToTable("fiscal_month_closings");
+            e.HasIndex(x => new { x.TenantId, x.Year, x.Month }).IsUnique();
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.Notes).HasMaxLength(2000);
+        });
+        m.Entity<AccountantSettings>(e =>
+        {
+            e.ToTable("accountant_settings");
+            e.HasKey(x => x.TenantId);
+            e.Property(x => x.OfficeName).HasMaxLength(120);
+            e.Property(x => x.ContactName).HasMaxLength(120);
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.ExtraEmails).HasMaxLength(1000);
+        });
+        m.Entity<AccountantDelivery>(e =>
+        {
+            e.ToTable("accountant_deliveries");
+            e.HasIndex(x => new { x.TenantId, x.Year, x.Month, x.Trigger });
+            e.Property(x => x.Trigger).HasMaxLength(20);
+            e.Property(x => x.Status).HasMaxLength(30);
+            e.Property(x => x.Recipients).HasMaxLength(1500);
+            e.Property(x => x.Detail).HasMaxLength(1000);
+            e.Property(x => x.EmailMessageIds).HasMaxLength(1000);
+        });
         m.Entity<SyncEvent>(e => { e.ToTable("sync_events"); e.HasIndex(x => new { x.TenantId, x.DeviceId, x.IdempotencyKey }).IsUnique(); });
         m.Entity<Notification>(e =>
         {

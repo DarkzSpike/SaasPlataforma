@@ -31,6 +31,12 @@ public sealed class SmtpEmailTransport(IHostEnvironment env, IConfiguration conf
             Subject = m.Subject, Body = m.HtmlBody, IsBodyHtml = true, BodyEncoding = Encoding.UTF8, SubjectEncoding = Encoding.UTF8,
         };
         mail.To.Add(m.To);
+        // Anexo gerado pelo próprio servidor (pacote do contador); sem o arquivo, o envio falha e fica registrado.
+        if (m.AttachmentPath is { } path)
+        {
+            if (!File.Exists(path)) throw new FileNotFoundException("anexo não encontrado no servidor");
+            mail.Attachments.Add(new Attachment(path, "application/zip") { Name = m.AttachmentName ?? Path.GetFileName(path) });
+        }
         using var client = new SmtpClient();
         if (cfg is null)
         {

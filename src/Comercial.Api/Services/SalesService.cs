@@ -43,8 +43,13 @@ public sealed class SalesService(
             throw new DomainException("variant_required", $"\"{parent.Name}\" tem grade: escolha o tamanho/cor (a variação).", 409);
         // Promoções vigentes calculadas no servidor (o PDV usa o mesmo cálculo para mostrar o total).
         var rules = await promotions.ActiveRulesAsync();
+        // Preço livre ("100=9,90"): só em produto marcado assim no cadastro; nos demais vale o preço do cadastro.
+        long UnitPrice(SaleItemRequest i) => products[i.ProductId].OpenPrice ? i.ClientUnitPriceCents ?? 0 : products[i.ProductId].PriceCents;
+        foreach (var i in r.Items.Where(i => products[i.ProductId].OpenPrice))
+            if (i.ClientUnitPriceCents is not (> 0 and <= 10_000_000))
+                throw new DomainException("open_price_required", $"\"{products[i.ProductId].Name}\" tem preço livre: informe o valor no caixa (ex.: {products[i.ProductId].Sku}=9,90).");
         var promo = Comercial.Shared.Promotions.PromotionEngine.Apply(
-            r.Items.Select(i => new Comercial.Shared.Promotions.PromoLine(i.ProductId, i.Quantity, products[i.ProductId].PriceCents)).ToList(), rules, clock.GetUtcNow(), r.CouponCode);
+            r.Items.Select(i => new Comercial.Shared.Promotions.PromoLine(i.ProductId, i.Quantity, UnitPrice(i))).ToList(), rules, clock.GetUtcNow(), r.CouponCode);
         if (!string.IsNullOrWhiteSpace(r.CouponCode))
         {
             var valid = rules.Any(x => x.Type == Comercial.Shared.Promotions.PromoType.Coupon && Comercial.Shared.Promotions.PromotionEngine.IsActive(x, clock.GetUtcNow())
@@ -66,12 +71,13 @@ public sealed class SalesService(
             var p = products[i.ProductId];
             if (i.Quantity <= 0 || i.Quantity > 100_000 || decimal.Round(i.Quantity, 3) != i.Quantity)
                 throw new DomainException("invalid_quantity", "Quantidade inválida.");
-            if (i.ClientUnitPriceCents is { } cp && cp != p.PriceCents)
+            if (!p.OpenPrice && i.ClientUnitPriceCents is { } cp && cp != p.PriceCents)
             {
                 await audit.WriteNowAsync("security.price_mismatch", actor.TenantId, nameof(Product), p.Id, new { clientPrice = cp, serverPrice = p.PriceCents, r.IdempotencyKey, r.CreatedOffline });
                 throw new DomainException("price_mismatch", "Preço divergente do cadastro. Atualize o catálogo e revise a venda.", 409);
             }
-            var gross = (long)decimal.Round(p.PriceCents * i.Quantity, 0, MidpointRounding.AwayFromZero);
+            var unit = UnitPrice(i);
+            var gross = (long)decimal.Round(unit * i.Quantity, 0, MidpointRounding.AwayFromZero);
             if (i.DiscountCents < 0 || i.DiscountCents > gross) throw new DomainException("invalid_discount", "Desconto inválido.");
             promoCents = Math.Min(promoCents, gross - i.DiscountCents);
             subtotal += gross;
@@ -79,7 +85,7 @@ public sealed class SalesService(
             promoTotal += promoCents;
             sale.Items.Add(new SaleItem
             {
-                SaleId = sale.Id, ProductId = p.Id, ProductName = p.Name, Quantity = i.Quantity, UnitPriceCents = p.PriceCents,
+                SaleId = sale.Id, ProductId = p.Id, ProductName = p.Name, Quantity = i.Quantity, UnitPriceCents = unit,
                 UnitCostCents = p.CostCents, DiscountCents = i.DiscountCents + promoCents, TotalCents = gross - i.DiscountCents - promoCents,
             });
         }
@@ -197,9 +203,10 @@ public sealed class SalesService(
                 db.CashMovements.Add(new CashMovement { CashSessionId = session.Id, Type = CashMovementType.CashSale, AmountCents = netCash, UserId = actor.UserId.Value, ReferenceId = sale.Id });
             if (creditCustomer is not null) credit.AddReceivable(sale, creditCustomer, onCredit);
             if (quote is not null) { quote.Status = QuoteStatus.Converted; quote.SaleId = sale.Id; sale.QuoteId = quote.Id; }
-            if (modules.Contains(ModuleKeys.Fiscal))
+            if (modules.Contains(ModuleKeys.Fiscal) && await IssuesNfceAsync(r))
                 db.FiscalDocuments.Add(new FiscalDocument { SaleId = sale.Id, Model = FiscalModel.NFCe, Status = FiscalStatus.PendingTransmission, LastMessage = "Aguardando transmissão." });
-            audit.Add("sale.created", actor.TenantId, nameof(Sale), sale.Id, new { sale.TotalCents, sale.DiscountCents, items = sale.Items.Count, r.CreatedOffline, customer = sale.CustomerId is not null, sale.LoyaltyPointsRedeemed });
+            audit.Add("sale.created", actor.TenantId, nameof(Sale), sale.Id, new { sale.TotalCents, sale.DiscountCents, items = sale.Items.Count, r.CreatedOffline, customer = sale.CustomerId is not null, sale.LoyaltyPointsRedeemed,
+                openPrice = r.Items.Count(i => products[i.ProductId].OpenPrice), r.IssueNfce });
             await db.SaveChangesAsync(); // a gravação da auditoria serializa as transações: o saldo de pontos abaixo é consistente
 
             var now = clock.GetUtcNow();
@@ -327,4 +334,11 @@ public sealed class SalesService(
 
     public static SaleResponse ToResponse(Sale s, bool duplicate) =>
         new(s.Id, s.IdempotencyKey, s.Status.ToString(), s.SubtotalCents, s.DiscountCents, s.TotalCents, s.ChangeCents, duplicate, s.LoyaltyDiscountCents);
+
+    /// <summary>Modo de emissão da loja: sempre, só quando o cliente pede (marcado no caixa) ou nunca (comprovante simples).</summary>
+    private async Task<bool> IssuesNfceAsync(CreateSaleRequest r)
+    {
+        var mode = await db.FiscalProfiles.AsNoTracking().Select(p => p.EmissionMode).FirstOrDefaultAsync() ?? NfceModes.Always;
+        return mode switch { NfceModes.Never => false, NfceModes.OnRequest => r.IssueNfce == true, _ => true };
+    }
 }

@@ -11,7 +11,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Comercial.Api.Endpoints;
 
 public sealed record ProductInput(string Sku, string? Barcode, string Name, string? Description, string Unit, long PriceCents, long CostCents, decimal MinStock, Guid? CategoryId, int? ExpectedVersion,
-    string? Ncm = null, string? Cest = null, string? Cfop = null, int FiscalOrigin = 0, string? IcmsCst = null, string? IbsCbsCst = null, string? IbsCbsClass = null);
+    string? Ncm = null, string? Cest = null, string? Cfop = null, int FiscalOrigin = 0, string? IcmsCst = null, string? IbsCbsCst = null, string? IbsCbsClass = null,
+    decimal? MarkupPercent = null, bool? OpenPrice = null);
 public sealed record StockEntryRequest(Guid StoreId, Guid ProductId, decimal Quantity, long UnitCostCents, string? Reason, string? BatchCode = null, DateOnly? ExpiresOn = null);
 public sealed record StockAdjustRequest(Guid StoreId, Guid ProductId, decimal Quantity, string Reason);
 public sealed record InventoryCount(Guid ProductId, decimal CountedQuantity);
@@ -24,11 +25,13 @@ public static class TenantEndpoints
     public static void MapTenantApi(this WebApplication app)
     {
         var auth = app.MapGroup("/api/v1/auth").RequireRateLimiting("auth");
-        auth.MapPost("/login", async (LoginRequest r, AuthService s) => Results.Ok(await s.LoginAsync(r)));
+        auth.MapPost("/login", async (LoginRequest r, AuthService s, HttpRequest req) => Results.Ok(await s.LoginAsync(r, ActorResolutionMiddleware.IsMobileClient(req))));
         auth.MapPost("/refresh", async (RefreshRequest r, AuthService s) => Results.Ok(await s.RefreshAsync(r.RefreshToken)));
         // "Esqueci minha senha": resposta sempre igual (não revela se o e-mail existe).
         // Cadastro com teste grátis (público, com limite por IP).
         var pub = app.MapGroup("/api/v1/public").RequireRateLimiting("auth");
+        pub.MapGet("/mobile/latest", async (PlatformSettingsService s) => await s.MobileReleaseAsync() is { } r ? Results.Ok(r) : Results.NoContent());
+        pub.MapGet("/support", async (PlatformSettingsService s) => Results.Ok(await s.SupportContactAsync()));
         pub.MapGet("/desktop/latest", async (DesktopReleaseService s) => await s.LatestAsync() is { } r ? Results.Ok(r) : Results.NoContent());
         pub.MapPost("/signup", async (SignupRequest r, SignupService s) => Results.Ok(await s.StartAsync(r)));
         pub.MapPost("/signup/verify", async (SignupVerifyRequest r, SignupService s) => Results.Ok(await s.VerifyAsync(r)));
@@ -86,16 +89,38 @@ public static class TenantEndpoints
         var products = api.MapGroup("/products");
         products.MapGet("/", async (AppDbContext db, string? q, int? skip) =>
         {
+            var term = InputRules.SearchTerm(q);
+            var offset = InputRules.Skip(skip);
             var query = db.Products.AsNoTracking().Where(p => p.IsActive);
-            if (!string.IsNullOrWhiteSpace(q)) query = query.Where(p => p.Name.Contains(q) || p.Sku == q || p.Barcode == q);
-            return Results.Ok(await query.OrderBy(p => p.Name).Skip(skip ?? 0).Take(200).ToListAsync());
+            if (term is not null) query = query.Where(p => p.Name.Contains(term) || p.Sku == term || p.Barcode == term);
+            return Results.Ok(await query.OrderBy(p => p.Name).Skip(offset).Take(200).ToListAsync());
         }).RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
         products.MapGet("/{id:guid}", async (Guid id, ScopedLookup l) => Results.Ok(await l.GetAsync<Product>(id)))
             .RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
-        products.MapPost("/", async (ProductInput r, AppDbContext db, AuditService audit, RequestActor a) =>
+        // Código de barras interno único (EAN-13 "200...") para produto sem código do fabricante.
+        products.MapPost("/barcode/generate", async (AppDbContext db) =>
         {
+            for (var i = 0; i < 20; i++)
+            {
+                var code = ProductCodes.NewInternalEan13();
+                if (!await BarcodeInUseAsync(db, code)) return Results.Ok(new { barcode = code });
+            }
+            throw new DomainException("barcode_unavailable", "Não foi possível gerar um código agora. Tente de novo.", 503);
+        }).RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite, write: true);
+        products.MapPost("/", async (ProductInput input, AppDbContext db, AuditService audit, RequestActor a) =>
+        {
+            var r = input;
+            // SKU em branco (cadastro rápido pelo celular): o sistema cria um código interno.
+            if (string.IsNullOrWhiteSpace(r.Sku))
+            {
+                var sku = ProductCodes.NewSku();
+                while (await db.Products.AnyAsync(p => p.Sku == sku)) sku = ProductCodes.NewSku();
+                r = r with { Sku = sku };
+            }
             Validate(r);
             if (await db.Products.AnyAsync(p => p.Sku == r.Sku)) throw new DomainException("sku_taken", "SKU já cadastrado.", 409);
+            if (!string.IsNullOrWhiteSpace(r.Barcode) && await BarcodeInUseAsync(db, r.Barcode.Trim()))
+                throw new DomainException("barcode_taken", "Este código de barras já pertence a outro produto.", 409);
             var p = new Product();
             Apply(p, r);
             db.Products.Add(p);
@@ -151,12 +176,12 @@ public static class TenantEndpoints
                               where p.IsActive
                               join b in db.StockBalances.AsNoTracking().Where(b => b.StoreId == storeId) on p.Id equals b.ProductId into bs
                               from b in bs.DefaultIfEmpty()
-                              select new { ProductId = p.Id, p.Name, p.Sku, p.Barcode, p.PriceCents, p.CostCents, Quantity = b == null ? 0m : b.Quantity, p.MinStock, HasImage = p.ImageKey != null,
+                              select new { ProductId = p.Id, p.Name, p.Sku, p.Barcode, p.PriceCents, p.CostCents, p.MarkupPercent, p.OpenPrice, Quantity = b == null ? 0m : b.Quantity, p.MinStock, HasImage = p.ImageKey != null,
                                   p.Unit, p.Ncm, p.Cest, p.Cfop, p.FiscalOrigin, p.IcmsCst, p.IbsCbsCst, p.IbsCbsClass })
                              .ToListAsync();
             return Results.Ok(rows.OrderBy(r => r.Name).Select(r => new
             {
-                r.ProductId, r.Name, r.Sku, r.Barcode, r.PriceCents, r.CostCents, r.Quantity, r.MinStock, r.HasImage, low = r.Quantity <= r.MinStock,
+                r.ProductId, r.Name, r.Sku, r.Barcode, r.PriceCents, r.CostCents, r.MarkupPercent, r.OpenPrice, r.Quantity, r.MinStock, r.HasImage, low = r.Quantity <= r.MinStock,
                 r.Unit, r.Ncm, r.Cest, r.Cfop, r.FiscalOrigin, r.IcmsCst, r.IbsCbsCst, r.IbsCbsClass,
             }));
         }).RequireFeature(ModuleKeys.Stock, Permissions.StockRead);
@@ -463,6 +488,72 @@ public static class TenantEndpoints
             });
         }).RequireFeature(ModuleKeys.OwnerApp, Permissions.ReportsRead);
 
+        // Resumo do período para o painel do dono no app: vendas por dia, mais vendidos, formas de pagamento,
+        // últimas vendas e produtos com estoque baixo. Só vendas concluídas (canceladas/devolvidas ficam fora).
+        api.MapGet("/mobile/overview", async (AppDbContext db, RequestActor a, int? days) =>
+        {
+            var n = Math.Clamp(days ?? 7, 1, 31);
+            var tz = await StoreClock.ZoneAsync(db, a);
+            var now = DateTimeOffset.UtcNow;
+            var from = StoreClock.StartOfDay(now, tz).AddDays(-(n - 1));
+            var q = db.Sales.AsNoTracking().Where(s => s.ReceivedAt >= from && s.Status == SaleStatus.Completed);
+            if (a.UserStoreId is { } st) q = q.Where(s => s.StoreId == st);
+            var sales = await q.Select(s => new { s.Id, s.TotalCents, s.ChangeCents, s.ReceivedAt, s.OperatorUserId }).ToListAsync();
+            var ids = sales.Select(s => s.Id).ToList();
+            var items = await db.SaleItems.AsNoTracking().Where(i => ids.Contains(i.SaleId))
+                .Select(i => new { i.SaleId, i.ProductId, i.ProductName, i.Quantity, i.TotalCents, i.UnitCostCents }).ToListAsync();
+            // Lucro = faturamento − custo dos produtos vendidos (custo gravado no momento da venda). Só para quem vê o financeiro.
+            var seesProfit = a.Permissions.Contains(Permissions.ReportsFinancial);
+            var costBySale = items.GroupBy(i => i.SaleId).ToDictionary(g => g.Key, g => g.Sum(i => (long)Math.Round(i.UnitCostCents * i.Quantity)));
+            long? Profit(IEnumerable<Guid> saleIds, long revenue) => seesProfit ? revenue - saleIds.Sum(id => costBySale.GetValueOrDefault(id)) : null;
+            var payments = await db.SalePayments.AsNoTracking().Where(p => ids.Contains(p.SaleId)).Select(p => new { p.SaleId, p.Method, p.AmountCents }).ToListAsync();
+            var names = await db.Users.AsNoTracking().Select(u => new { u.Id, u.DisplayName }).ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+
+            var byDay = Enumerable.Range(0, n).Select(i =>
+            {
+                var d0 = from.AddDays(i); var d1 = d0.AddDays(1);
+                var day = sales.Where(s => s.ReceivedAt >= d0 && s.ReceivedAt < d1).ToList();
+                var rev = day.Sum(s => s.TotalCents);
+                return new { date = TimeZoneInfo.ConvertTime(d0, tz).ToString("yyyy-MM-dd"), revenueCents = rev, profitCents = Profit(day.Select(s => s.Id), rev), count = day.Count };
+            });
+            var top = items.GroupBy(i => new { i.ProductId, i.ProductName })
+                .Select(g => new
+                {
+                    productId = g.Key.ProductId, name = g.Key.ProductName, quantity = g.Sum(i => i.Quantity), revenueCents = g.Sum(i => i.TotalCents),
+                    profitCents = seesProfit ? g.Sum(i => i.TotalCents - (long)Math.Round(i.UnitCostCents * i.Quantity)) : (long?)null,
+                })
+                .OrderByDescending(x => x.revenueCents).Take(10);
+            var change = sales.Sum(s => s.ChangeCents);
+            var mix = payments.GroupBy(p => p.Method).Select(g => new
+            {
+                method = g.Key.ToString(),
+                amountCents = g.Sum(p => p.AmountCents) - (g.Key == PaymentMethod.Cash ? change : 0), // dinheiro: desconta o troco
+            }).OrderByDescending(x => x.amountCents);
+            var itemsBySale = items.ToLookup(i => i.SaleId);
+            var recent = sales.OrderByDescending(s => s.ReceivedAt).Take(15).Select(s => new
+            {
+                s.Id, s.ReceivedAt, s.TotalCents,
+                @operator = names.GetValueOrDefault(s.OperatorUserId, ""),
+                items = itemsBySale[s.Id].Count(),
+                summary = string.Join(", ", itemsBySale[s.Id].Take(3).Select(i => i.ProductName)),
+            });
+            var lowStock = await (from b in db.StockBalances.AsNoTracking()
+                                  join p in db.Products.AsNoTracking() on b.ProductId equals p.Id
+                                  where p.IsActive && b.Quantity <= p.MinStock
+                                  orderby b.Quantity
+                                  select new { p.Id, p.Name, b.Quantity, p.MinStock, p.Unit }).Take(30).ToListAsync();
+            var noPrice = await db.Products.AsNoTracking().CountAsync(p => p.IsActive && p.PriceCents == 0);
+            return Results.Ok(new
+            {
+                days = n, revenueCents = sales.Sum(s => s.TotalCents), salesCount = sales.Count,
+                profitCents = Profit(sales.Select(s => s.Id), sales.Sum(s => s.TotalCents)),
+                // Itens vendidos sem custo cadastrado deixam o lucro maior do que o real: o app avisa.
+                itemsWithoutCost = seesProfit ? items.Count(i => i.UnitCostCents <= 0) : 0,
+                averageTicketCents = sales.Count == 0 ? 0 : sales.Sum(s => s.TotalCents) / sales.Count,
+                byDay, topProducts = top, paymentMix = mix, recentSales = recent, lowStock, productsWithoutPrice = noPrice,
+            });
+        }).RequireFeature(ModuleKeys.OwnerApp, Permissions.ReportsRead);
+
         // ---------- Usuários e dispositivos ----------
         var users = api.MapGroup("/users");
         users.MapGet("/permission-catalog", (RequestActor a) => Results.Ok(new
@@ -478,15 +569,26 @@ public static class TenantEndpoints
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapPost("/{id:guid}/password", async (Guid id, ResetPasswordRequest r, UserService s) => { await s.ResetPasswordAsync(id, r); return Results.NoContent(); })
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
-        users.MapGet("/", async (AppDbContext db) => Results.Ok(await db.Users.AsNoTracking().Include(u => u.Roles)
-                .Select(u => new { u.Id, u.Email, u.DisplayName, u.IsActive, u.StoreId, u.LastLoginAt, u.CommissionPercent, roles = u.Roles.Select(r => r.Role) }).ToListAsync()))
-            .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
+        users.MapGet("/", async (AppDbContext db) =>
+        {
+            var list = await db.Users.AsNoTracking().Include(u => u.Roles)
+                .Select(u => new { u.Id, u.Email, u.DisplayName, u.IsActive, u.StoreId, u.LastLoginAt, u.CommissionPercent, roles = u.Roles.Select(r => r.Role).ToList() }).ToListAsync();
+            var grants = (await db.UserPermissionGrants.AsNoTracking().Select(g => new { g.UserId, g.Permission, g.Granted }).ToListAsync()).ToLookup(g => g.UserId);
+            return Results.Ok(list.Select(u => new
+            {
+                u.Id, u.Email, u.DisplayName, u.IsActive, u.StoreId, u.LastLoginAt, u.CommissionPercent, u.roles,
+                mobileAccess = Permissions.Resolve(u.roles, grants[u.Id].Select(g => (g.Permission, g.Granted))).Contains(Permissions.MobileAccess),
+            }));
+        }).RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapPost("/", async (CreateUserRequest r, UserService s) => { var u = await s.CreateAsync(r); return Results.Created($"/api/v1/users/{u.Id}", new { u.Id, u.Email }); })
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage, write: true);
         users.MapPut("/{id:guid}/roles", async (Guid id, SetRolesRequest r, UserService s) => { await s.SetRolesAsync(id, r); return Results.NoContent(); })
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapPut("/{id:guid}/permissions", async (Guid id, List<PermissionGrantInput> r, UserService s) => { await s.SetPermissionsAsync(id, r); return Results.NoContent(); })
             .RequireFeature(ModuleKeys.UsersAdvanced, Permissions.UsersManage);
+        // Liberar/bloquear o app do celular para um funcionário (não exige o módulo de permissões avançadas).
+        users.MapPut("/{id:guid}/mobile-access", async (Guid id, MobileAccessRequest r, UserService s) => { await s.SetMobileAccessAsync(id, r.Allowed); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapPost("/{id:guid}/block", async (Guid id, UserService s) => { await s.SetActiveAsync(id, false); return Results.NoContent(); })
             .RequireFeature(ModuleKeys.Core, Permissions.UsersManage);
         users.MapPost("/{id:guid}/unblock", async (Guid id, UserService s) => { await s.SetActiveAsync(id, true); return Results.NoContent(); })
@@ -527,8 +629,20 @@ public static class TenantEndpoints
             var roles = a.Roles.ToList();
             var q = db.Notifications.AsNoTracking().Where(n => roles.Contains(n.TargetRole));
             if (unread == true) q = q.Where(n => n.ReadAt == null);
-            return Results.Ok(await q.OrderByDescending(n => n.CreatedAt).Take(100)
-                .Select(n => new { n.Id, n.Type, n.Title, n.Body, n.CreatedAt, n.ReadAt, n.PushStatus }).ToListAsync());
+            var rows = await q.OrderByDescending(n => n.CreatedAt).Take(100)
+                .Select(n => new { n.Id, n.Type, n.Title, n.Body, n.CreatedAt, n.ReadAt, n.PushStatus, n.DataJson }).ToListAsync();
+            // Avisos de fatura levam o id da fatura: o caixa mostra "Pagar agora" direto no aviso.
+            static Guid? InvoiceOf(string type, string? json)
+            {
+                if (!type.StartsWith("invoice.") || string.IsNullOrEmpty(json)) return null;
+                try
+                {
+                    using var d = System.Text.Json.JsonDocument.Parse(json);
+                    return d.RootElement.TryGetProperty("invoiceId", out var v) && v.TryGetGuid(out var g) ? g : null;
+                }
+                catch (System.Text.Json.JsonException) { return null; }
+            }
+            return Results.Ok(rows.Select(n => new { n.Id, n.Type, n.Title, n.Body, n.CreatedAt, n.ReadAt, n.PushStatus, invoiceId = InvoiceOf(n.Type, n.DataJson) }));
         }).RequireFeature(ModuleKeys.Core, null);
         api.MapPost("/notifications/{id:guid}/read", async (Guid id, AppDbContext db, RequestActor a) =>
         {
@@ -591,6 +705,10 @@ public static class TenantEndpoints
             .RequireFeature(ModuleKeys.Core, Permissions.BillingManage);
     }
 
+    /// <summary>Código já usado como código de barras principal, código extra ou SKU de outro produto.</summary>
+    private static async Task<bool> BarcodeInUseAsync(AppDbContext db, string code) =>
+        await db.Products.AnyAsync(p => p.Barcode == code || p.Sku == code) || await db.ProductBarcodes.AnyAsync(x => x.Code == code);
+
     private static void Validate(ProductInput r)
     {
         if (string.IsNullOrWhiteSpace(r.Sku) || r.Sku.Length > 60) throw new DomainException("invalid_sku", "SKU inválido.");
@@ -599,15 +717,19 @@ public static class TenantEndpoints
         if (r.PriceCents < 0 || r.PriceCents > 100_000_000 || r.CostCents < 0 || r.CostCents > 100_000_000) throw new DomainException("invalid_price", "Preço ou custo inválido.");
         if (r.Unit is not ("UN" or "KG" or "G" or "L" or "ML" or "M" or "CX" or "PC")) throw new DomainException("invalid_unit", "Unidade inválida.");
         if (r.MinStock < 0) throw new DomainException("invalid_min_stock", "Estoque mínimo inválido.");
+        if (r.MarkupPercent is < 0 or > Comercial.Shared.Pricing.MaxMarkupPercent) throw new DomainException("invalid_markup", "% de lucro deve ficar entre 0 e 10.000.");
         if (FiscalRules.ValidateProduct(r.Ncm, r.Cest, r.Cfop, r.FiscalOrigin, r.IcmsCst, r.IbsCbsCst, r.IbsCbsClass) is { } fe) throw new DomainException("invalid_fiscal", fe);
     }
 
     private static void Apply(Product p, ProductInput r)
     {
         p.Sku = r.Sku.Trim(); p.Barcode = r.Barcode?.Trim(); p.Name = r.Name.Trim(); p.Description = r.Description;
-        p.Unit = r.Unit; p.PriceCents = r.PriceCents; p.CostCents = r.CostCents; p.MinStock = r.MinStock; p.CategoryId = r.CategoryId;
+        // Com % de lucro informada, o preço de venda é calculado aqui (mesma regra do caixa e do app).
+        p.Unit = r.Unit; p.CostCents = r.CostCents; p.MarkupPercent = r.MarkupPercent;
+        p.PriceCents = r.MarkupPercent is { } m ? Comercial.Shared.Pricing.PriceFromMarkup(r.CostCents, m) : r.PriceCents; p.MinStock = r.MinStock; p.CategoryId = r.CategoryId;
         static string? D(string? s) => string.IsNullOrWhiteSpace(s) ? null : FiscalRules.Digits(s);
         p.Ncm = D(r.Ncm); p.Cest = D(r.Cest); p.Cfop = D(r.Cfop); p.FiscalOrigin = r.FiscalOrigin; p.IcmsCst = D(r.IcmsCst);
         p.IbsCbsCst = D(r.IbsCbsCst); p.IbsCbsClass = D(r.IbsCbsClass);
+        if (r.OpenPrice is { } open) p.OpenPrice = open;
     }
 }

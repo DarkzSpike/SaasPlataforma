@@ -86,6 +86,80 @@ function confirmDialog({ title, text, tenantCode, totp, reason }) {
   });
 }
 
+/** Diálogo com campos (data, valor...) + confirmação da empresa, motivo e MFA. Devolve os valores ou null. */
+function formDialog({ title, text, fields, tenantCode, totp, reason, confirmText }) {
+  return new Promise(resolve => {
+    const err = h('div', { class: 'error' });
+    const inputs = fields.map(f => {
+      const el = f.type === 'checkbox' ? h('input', { type: 'checkbox' }) : h('input', { type: f.type || 'text', value: f.value ?? '', placeholder: f.placeholder || '', min: f.min, step: f.step });
+      if (f.type === 'checkbox') el.checked = !!f.value;
+      return { f, el };
+    });
+    const codeIn = h('input', { placeholder: 'Digite o código da empresa: ' + (tenantCode || ''), autocomplete: 'off' });
+    const totpIn = h('input', { placeholder: 'Código do autenticador (6 dígitos)', inputmode: 'numeric', maxlength: '6', autocomplete: 'one-time-code' });
+    const reasonIn = h('textarea', { rows: '2', placeholder: 'Motivo (registrado na auditoria)' });
+    const dlg = h('dialog', {},
+      h('h3', {}, title), text ? h('p', {}, text) : null,
+      inputs.map(({ f, el }) => f.type === 'checkbox' ? h('label', { class: 'row' }, el, ' ' + f.label) : [h('label', {}, f.label), el, f.help ? h('div', { class: 'muted' }, f.help) : null]),
+      tenantCode ? [h('label', {}, 'Confirmação da empresa afetada'), codeIn] : null,
+      reason ? [h('label', {}, 'Motivo'), reasonIn] : null,
+      totp ? [h('label', {}, 'Reautenticação (MFA)'), totpIn] : null,
+      err,
+      h('div', { class: 'row', style: 'margin-top:12px;justify-content:flex-end' },
+        h('button', { class: 'btn secondary', onclick: () => { dlg.close(); dlg.remove(); resolve(null); } }, 'Cancelar'),
+        h('button', { class: 'btn', onclick: () => {
+          if (tenantCode && codeIn.value !== tenantCode) { err.textContent = 'O código digitado não corresponde à empresa selecionada.'; return; }
+          if (reason && reasonIn.value.trim().length < 5) { err.textContent = 'Informe o motivo.'; return; }
+          const values = {};
+          for (const { f, el } of inputs) values[f.key] = f.type === 'checkbox' ? el.checked : el.value.trim();
+          dlg.close(); dlg.remove(); resolve({ values, code: codeIn.value, totp: totpIn.value, reason: reasonIn.value.trim() });
+        } }, confirmText || 'Confirmar')));
+    document.body.append(dlg);
+    linkLabels(dlg);
+    dlg.showModal();
+  });
+}
+
+/** "19,90" ou "19.90" → 1990 (null se vazio, NaN se inválido). */
+function toCents(v) {
+  if (!v) return null;
+  const n = Number(String(v).replace(/[R$\s]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : NaN;
+}
+const isoDate = d => { const x = new Date(d); return new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const addDays = n => isoDate(Date.now() + n * 86400000);
+
+/** Ações de uma fatura em aberto (empresa e lista geral). */
+function invoiceActions(inv, tenant) {
+  if (!(inv.status === 1 || inv.status === 'aberta')) return null;
+  const edit = async () => {
+    const c = await formDialog({ title: 'Editar fatura', text: `${tenant.tradeName}: fatura de ${money(inv.amountCents)} com vencimento em ${dt(inv.dueAt)}. Se o cliente já gerou PIX ou link de pagamento, eles são cancelados e o cliente é avisado.`,
+      fields: [{ key: 'due', label: 'Novo vencimento', type: 'date', value: isoDate(inv.dueAt) }, { key: 'amount', label: 'Novo valor (R$)', value: (inv.amountCents / 100).toFixed(2).replace('.', ',') }],
+      tenantCode: tenant.code, totp: true, reason: true, confirmText: 'Salvar alterações' });
+    if (!c) return;
+    const cents = toCents(c.values.amount);
+    if (Number.isNaN(cents)) { alert('Valor inválido.'); return; }
+    try {
+      await call('PUT', `/admin/v1/invoices/${inv.id}`, { dueDate: c.values.due || null, amountCents: cents === inv.amountCents ? null : cents, confirmTenantCode: c.code, reason: c.reason }, { 'X-Reauth-Totp': c.totp });
+      render();
+    } catch (e) { alert(e.message); }
+  };
+  const cancel = async () => {
+    const c = await confirmDialog({ title: 'Cancelar fatura', text: `${tenant.tradeName}: ${money(inv.amountCents)} (vence ${dt(inv.dueAt)}). O PIX/link gerado deixa de valer.`, tenantCode: tenant.code, totp: true, reason: true });
+    if (!c) return;
+    try { await call('POST', `/admin/v1/invoices/${inv.id}/cancel`, { confirmTenantCode: c.code, reason: c.reason }, { 'X-Reauth-Totp': c.totp }); render(); } catch (e) { alert(e.message); }
+  };
+  const paid = async () => {
+    const c = await confirmDialog({ title: 'Baixar fatura manualmente', text: `Use só se o pagamento entrou fora do Mercado Pago (ex.: transferência). ${tenant.tradeName} • ${money(inv.amountCents)}.`, tenantCode: tenant.code, totp: true, reason: true });
+    if (!c) return;
+    try { await call('POST', `/admin/v1/invoices/${inv.id}/mark-paid`, { confirmTenantCode: c.code, reason: c.reason }, { 'X-Reauth-Totp': c.totp }); render(); } catch (e) { alert(e.message); }
+  };
+  return h('div', { class: 'row' },
+    h('button', { class: 'btn secondary', onclick: edit }, 'Editar'),
+    h('button', { class: 'btn secondary', onclick: paid }, 'Marcar como paga'),
+    h('button', { class: 'btn danger', onclick: cancel }, 'Cancelar'));
+}
+
 // ---------- Telas ----------
 function loginView(msg) {
   const email = h('input', { type: 'email', autocomplete: 'username' });
@@ -182,12 +256,37 @@ function tenantSummary(d) {
         h('p', { class: 'muted' }, `Limites: ${s ? s.maxUsers : 0} usuários, ${s ? s.maxDevices : 0} terminais, ${s ? s.maxStores : 0} lojas • ${d.activeUsers} usuários ativos`),
         h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: () => { state.tab = 'loja'; render(); } }, 'Acessar loja (suporte)'),
-          h('button', { class: 'btn secondary', onclick: async () => { await call('POST', `/admin/v1/tenants/${t.id}/invoices`, { dueInDays: 5 }); render(); } }, 'Gerar fatura'),
+          h('button', { class: 'btn secondary', onclick: async () => {
+            const c = await formDialog({ title: 'Gerar fatura agora', text: `Cria a fatura do próximo período de ${t.tradeName} já agora (serve também para testar). Se já existir uma em aberto, nada é duplicado.`,
+              fields: [{ key: 'due', label: 'Vencimento', type: 'date', value: addDays(5) },
+                       { key: 'amount', label: 'Valor (R$)', value: s ? (s.priceCents / 100).toFixed(2).replace('.', ',') : '', help: 'Padrão: valor do plano.' },
+                       { key: 'notify', label: 'Avisar o cliente (aviso no sistema + e-mail)', type: 'checkbox', value: true }], confirmText: 'Gerar fatura' });
+            if (!c) return;
+            const cents = toCents(c.values.amount);
+            if (Number.isNaN(cents)) { alert('Valor inválido.'); return; }
+            try {
+              const r = await call('POST', `/admin/v1/tenants/${t.id}/invoices`, { dueDate: c.values.due || null, amountCents: cents, notify: c.values.notify });
+              if (r.alreadyExisted) alert(`Já existe uma fatura em aberto deste período (${money(r.amountCents)}, vence ${dt(r.dueAt)}). Use "Editar" na lista de faturas para mudar a data ou o valor.`);
+              render();
+            } catch (e) { alert(e.message); }
+          } }, 'Gerar fatura agora'),
+          h('button', { class: 'btn secondary', onclick: async () => {
+            const c = await formDialog({ title: 'Mudar dia de cobrança', text: `Próximo vencimento atual: ${dt(s && s.currentPeriodEnd)}. A partir da data escolhida, as cobranças seguem esse dia (todo mês). A fatura em aberto do próximo período acompanha.`,
+              fields: [{ key: 'date', label: 'Novo próximo vencimento', type: 'date', value: s ? isoDate(s.currentPeriodEnd) : addDays(30) }], tenantCode: t.code, totp: true, reason: true, confirmText: 'Salvar' });
+            if (!c) return;
+            try { await call('PUT', `/admin/v1/tenants/${t.id}/billing-date`, { nextDueDate: c.values.date, confirmTenantCode: c.code, reason: c.reason }, { 'X-Reauth-Totp': c.totp }); render(); }
+            catch (e) { alert(e.message); }
+          } }, 'Mudar dia de cobrança'),
           t.status === 1
             ? h('button', { class: 'btn danger', onclick: () => critical(`/admin/v1/tenants/${t.id}/suspend`, 'Suspender empresa', true) }, 'Suspender')
             : h('button', { class: 'btn', onclick: () => critical(`/admin/v1/tenants/${t.id}/reactivate`, 'Reativar empresa', false) }, 'Reativar'))),
       h('div', { class: 'card' }, h('h2', {}, 'Lojas'), h('ul', {}, d.stores.map(s => h('li', {}, `${s.name} (${s.code})`))),
-        h('h2', {}, 'Faturas'), d.invoices.length ? h('ul', {}, d.invoices.map(i => h('li', {}, `${money(i.amountCents)} • vence ${dt(i.dueAt)} • ${['', 'aberta', 'paga', 'cancelada'][i.status]}`))) : h('p', { class: 'muted' }, 'Nenhuma fatura.'))),
+        h('h2', {}, 'Faturas'), d.invoices.length
+          ? h('table', {}, h('tbody', {}, d.invoices.map(i => h('tr', {},
+              h('td', {}, money(i.amountCents)), h('td', {}, 'vence ' + dt(i.dueAt)),
+              h('td', {}, h('span', { class: 'pill ' + (i.status === 2 ? 'ok' : i.status === 3 ? '' : 'warn') }, ['', 'aberta', 'paga', 'cancelada'][i.status])),
+              h('td', {}, invoiceActions(i, t))))))
+          : h('p', { class: 'muted' }, 'Nenhuma fatura.'))),
     h('div', { class: 'card' }, h('h2', {}, 'Dispositivos'),
       h('table', {}, h('thead', {}, h('tr', {}, ['Nome', 'Plataforma', 'Situação', 'Versão', 'Última sincronização', 'Último erro'].map(x => h('th', {}, x)))),
         h('tbody', {}, d.devices.map(x => h('tr', {}, h('td', {}, x.name), h('td', {}, x.platform), h('td', {}, x.status), h('td', {}, x.appVersion || '—'), h('td', {}, dt(x.lastSyncAt)), h('td', {}, x.lastError || '—')))))),
@@ -229,9 +328,28 @@ async function tenantStorage(d) {
   const t = d.tenant;
   const base = `/admin/v1/tenants/${t.id}/storage`;
   const s = await call('GET', base);
+  const goog = await call('GET', '/admin/v1/settings/google-oauth');
   const msg = h('div', { class: 'muted' });
   const err = h('div', { class: 'error' });
   const provider = h('select', {}, h('option', { value: 'local' }, 'Servidor (padrão)'), h('option', { value: 'gdrive' }, 'Google Drive da empresa'));
+  // Conta Google pessoal (OAuth): abre o Google numa aba nova; ao autorizar, a pasta é criada e a configuração salva sozinha.
+  const connectGoogle = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Conectar conta Google', text: `As fotos de ${t.tradeName} passam a ser salvas numa pasta criada no Google Drive da conta que você autorizar. O sistema só enxerga os arquivos que ele mesmo criar.`, totp: true });
+    if (!c) return;
+    try {
+      const r = await call('POST', base + '/google/start', {}, { 'X-Reauth-Totp': c.totp });
+      window.open(r.url, '_blank', 'noopener');
+      msg.textContent = 'Autorize na aba do Google que abriu. Depois volte aqui e clique em "Atualizar".';
+    } catch (e) { err.textContent = e.message; }
+  };
+  const googleBox = h('div', { class: 'card', style: 'background:transparent;margin:0 0 12px 0' },
+    h('h3', {}, 'Google Drive pessoal (conta Gmail)'),
+    goog.configured
+      ? [h('p', { class: 'muted' }, 'Funciona com Gmail grátis. Clique, escolha a sua conta Google e autorize: o sistema cria a pasta "Sistema Comercial - ', t.tradeName, '" no seu Drive.'),
+         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: connectGoogle }, s.provider === 'gdrive' && s.hasCredentials ? 'Conectar outra conta Google' : 'Conectar minha conta Google'),
+           h('button', { class: 'btn secondary', onclick: () => render() }, 'Atualizar'))]
+      : h('p', { class: 'muted' }, 'Para usar, configure primeiro o app do Google na aba "Google" (Client ID e segredo).'));
   provider.value = s.provider;
   const folder = h('input', { placeholder: 'Cole o link da pasta (https://drive.google.com/drive/folders/...) ou o ID', value: s.driveFolderId || '' });
   const impersonate = h('input', { type: 'email', placeholder: 'Opcional — só com delegação de domínio do Google Workspace', value: s.impersonateUser || '' });
@@ -275,12 +393,16 @@ async function tenantStorage(d) {
     h('div', { class: 'card' }, h('h2', {}, 'Armazenamento de arquivos'),
       h('p', { class: 'muted' }, 'Define onde ficam as fotos de produtos desta empresa. A credencial é guardada criptografada e nunca é exibida de volta; o acesso aos arquivos é sempre feito pela API, que confere a empresa.'),
       status,
-      h('label', {}, 'Onde salvar'), provider, gdriveBox,
+      s.provider === 'gdrive' && s.hasCredentials ? h('p', {}, 'Conta conectada: ', h('strong', {}, s.credentialsClientEmail)) : null,
+      googleBox,
+      h('details', {}, h('summary', {}, 'Configuração avançada (conta de serviço / Google Workspace)'),
+        h('label', {}, 'Onde salvar'), provider, gdriveBox),
       h('div', { class: 'row', style: 'margin-top:12px' },
         h('button', { class: 'btn', onclick: save }, 'Salvar'),
         h('button', { class: 'btn secondary', onclick: test, disabled: !s.version }, 'Testar conexão')),
       msg, err),
-    h('div', { class: 'card' }, h('h2', {}, 'Como criar a pasta e a API no Google'),
+    h('div', { class: 'card' }, h('h2', {}, 'Avançado: conta de serviço (só Google Workspace)'),
+      h('p', { class: 'muted' }, 'Contas de serviço não têm espaço próprio: só gravam num Drive compartilhado do Google Workspace. Com Gmail grátis, use "Conectar minha conta Google".'),
       h('ol', {},
         h('li', {}, 'No Google Cloud Console, crie um projeto e ative a "Google Drive API".'),
         h('li', {}, 'Em "IAM e administrador → Contas de serviço", crie uma conta de serviço e gere uma chave do tipo JSON (baixa um arquivo).'),
@@ -336,10 +458,22 @@ async function brandingEditor(d) {
   const msg = h('div', { class: 'muted' });
   const preview = h('div', { class: 'preview-wrap' });
   const logoUrls = {};
+  const imgUrl = id => id && logoUrls[id] ? logoUrls[id] : null;
 
   const colorFields = [['primaryColor', 'Primária'], ['secondaryColor', 'Secundária'], ['accentColor', 'Destaque'], ['backgroundColor', 'Fundo'], ['surfaceColor', 'Superfície'],
     ['textColor', 'Texto'], ['borderColor', 'Bordas'], ['darkBackgroundColor', 'Fundo (escuro)'], ['darkSurfaceColor', 'Superfície (escuro)'], ['darkTextColor', 'Texto (escuro)']];
-  const textFields = [['systemName', 'Nome do sistema'], ['companyName', 'Nome da empresa'], ['welcomeMessage', 'Mensagem de boas-vindas'], ['reportHeader', 'Cabeçalho de relatórios']];
+  const textFields = [['systemName', 'Nome do sistema (aparece no caixa, no login e no comprovante)', 60], ['companyName', 'Nome da empresa', 120],
+    ['welcomeMessage', 'Mensagem de boas-vindas (login)', 200], ['loginSubtitle', 'Texto abaixo das boas-vindas (login)', 120], ['tagline', 'Slogan abaixo do nome (login)', 60],
+    ['headerSubtitle', 'Subtítulo no topo do caixa', 80], ['feature1', 'Destaque 1 (rodapé do login)', 40], ['feature2', 'Destaque 2', 40], ['feature3', 'Destaque 3', 40],
+    ['reportHeader', 'Cabeçalho de relatórios', 200]];
+  // Imagens da empresa: tipo enviado ao servidor → campo da configuração.
+  const imageKinds = [
+    ['logo', 'logoAssetId', 'Logo (fundo claro)', 'PNG com fundo transparente, ~600×200'],
+    ['logo_dark', 'logoDarkAssetId', 'Logo para fundo escuro (topo do caixa e login)', 'Versão clara/branca da logo; se faltar, usa a logo normal'],
+    ['icon', 'iconAssetId', 'Ícone (janela, barra de tarefas e cadeado do login)', 'Quadrado, PNG, 256×256'],
+    ['login_image', 'loginImageAssetId', 'Ilustração do login (lado esquerdo)', 'Substitui o desenho do caixa; PNG transparente ~1000×650'],
+    ['login_background', 'loginBackgroundAssetId', 'Imagem de fundo do login', 'Foto da loja ou da marca; JPEG 1920×1080 (fica com a cor da marca por cima)'],
+    ['splash', 'splashAssetId', 'Tela de abertura (app do celular)', 'Opcional']];
   const selects = [['theme', 'Tema', ['moderno', 'minimalista', 'elegante', 'vibrante', 'classico', 'alto_contraste']], ['fontFamily', 'Fonte', ['Inter', 'Roboto', 'Open Sans', 'Lato', 'Source Sans 3', 'Segoe UI']],
     ['buttonStyle', 'Botões', ['rounded', 'square', 'pill']], ['cardStyle', 'Cartões', ['flat', 'elevated', 'outlined']], ['density', 'Densidade', ['compact', 'normal', 'comfortable']], ['defaultMode', 'Modo padrão', ['light', 'dark', 'system']]];
   const inputs = {};
@@ -359,7 +493,32 @@ async function brandingEditor(d) {
     };
     const tile = (sf, text) => { const e = h('div', { class: 'tile' }, text); e.style.background = sf; e.style.border = cfg.cardStyle === 'outlined' ? `1px solid ${cfg.borderColor}` : '0'; e.style.boxShadow = cfg.cardStyle === 'elevated' ? '0 1px 4px rgba(0,0,0,.15)' : 'none'; return e; };
     const btn = (text, color) => { const e = h('span', { class: 'pbtn' }, text); e.style.background = color || cfg.primaryColor; e.style.borderRadius = radius(); return e; };
-    preview.replaceChildren(
+    // Prévia da tela de login do caixa (como fica no computador da loja).
+    const pdvLogin = (() => {
+      const box = h('div', { class: 'pv' });
+      box.style.display = 'grid'; box.style.gridTemplateColumns = '1.1fr 1fr'; box.style.minHeight = '230px'; box.style.position = 'relative';
+      box.style.fontFamily = cfg.fontFamily + ', system-ui'; box.style.overflow = 'hidden';
+      const left = h('div', {}); left.style.padding = '14px'; left.style.color = '#fff'; left.style.position = 'relative';
+      left.style.background = `linear-gradient(135deg, ${cfg.primaryColor}cc, #000000dd)`;
+      if (imgUrl(cfg.loginBackgroundAssetId)) { left.style.backgroundImage = `linear-gradient(135deg, ${cfg.primaryColor}99, #000000aa), url(${imgUrl(cfg.loginBackgroundAssetId)})`; left.style.backgroundSize = 'cover'; left.style.backgroundPosition = 'center'; }
+      const logoDark = imgUrl(cfg.logoDarkAssetId) || imgUrl(cfg.logoAssetId);
+      const brand = h('div', { style: 'display:flex;align-items:center;gap:8px' },
+        logoDark ? h('img', { src: logoDark, alt: '', style: 'max-height:34px;max-width:90px' }) : h('span', { style: 'font-size:26px' }, '🛒'),
+        h('div', {}, h('div', { style: 'font-weight:700;font-size:16px' }, cfg.systemName), h('div', { style: 'font-size:8px;letter-spacing:2px;opacity:.8' }, (cfg.tagline || '').toUpperCase())));
+      const ill = imgUrl(cfg.loginImageAssetId) ? h('img', { src: imgUrl(cfg.loginImageAssetId), alt: '', style: 'max-width:100%;max-height:70px;margin:8px 0' }) : h('div', { style: 'height:50px;margin:8px 0;border-radius:6px;background:#ffffff22' });
+      left.append(brand, h('div', { style: 'font-weight:700;margin-top:10px' }, cfg.welcomeMessage), h('div', { style: 'font-size:11px;opacity:.85' }, cfg.loginSubtitle || ''), ill,
+        h('div', { style: 'display:flex;gap:8px;font-size:9px;opacity:.9' }, [cfg.feature1, cfg.feature2, cfg.feature3].map(f => h('span', {}, '✔ ' + (f || '')))));
+      const right = h('div', {}); right.style.background = cfg.backgroundColor; right.style.display = 'flex'; right.style.alignItems = 'center'; right.style.justifyContent = 'center';
+      const card = h('div', {}); card.style.background = cfg.surfaceColor; card.style.color = cfg.textColor; card.style.padding = '12px'; card.style.borderRadius = '10px'; card.style.width = '80%';
+      const icon = imgUrl(cfg.iconAssetId);
+      card.append(h('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px' },
+        icon ? h('img', { src: icon, alt: '', style: 'width:26px;height:26px' }) : h('span', {}, '🔒'), h('strong', {}, cfg.systemName)),
+        h('div', { style: `height:12px;border:1px solid ${cfg.borderColor};border-radius:4px;margin:4px 0` }), h('div', { style: `height:12px;border:1px solid ${cfg.borderColor};border-radius:4px;margin:4px 0` }), btn('Entrar'));
+      right.append(card);
+      box.append(left, right);
+      return h('div', {}, h('div', { class: 'muted', style: 'margin:4px 0' }, 'Login do caixa'), box);
+    })();
+    preview.replaceChildren(pdvLogin,
       screen('Login', false, sf => [tile(sf, cfg.welcomeMessage), btn('Entrar')]),
       screen('Dashboard', false, sf => [tile(sf, 'Vendas hoje: R$ 1.234,00'), tile(sf, 'Estoque baixo: 3 itens')]),
       screen('PDV', false, sf => [tile(sf, 'Total: R$ 59,90'), btn('Finalizar', cfg.accentColor)]),
@@ -373,12 +532,20 @@ async function brandingEditor(d) {
     const fd = new FormData(); fd.append('kind', kind); fd.append('file', input.files[0]);
     try {
       const a = await call('POST', base + '/assets', fd);
-      const key = { logo: 'logoAssetId', logo_dark: 'logoDarkAssetId', icon: 'iconAssetId', splash: 'splashAssetId' }[kind];
+      const key = imageKinds.find(k => k[0] === kind)[1];
       cfg[key] = a.id; logoUrls[a.id] = await blobUrl(`${base}/assets/${a.id}`);
-      msg.textContent = `Imagem enviada (${a.width}×${a.height}). Salve o rascunho para usá-la.`; renderPreview();
+      msg.textContent = `Imagem enviada (${a.width}×${a.height}). Salve o rascunho e publique para aparecer nos caixas.`; renderPreview(); renderImages();
     } catch (e) { msg.textContent = 'Upload recusado: ' + e.message; }
   };
-  if (cfg.logoAssetId) logoUrls[cfg.logoAssetId] = await blobUrl(`${base}/assets/${cfg.logoAssetId}`);
+  for (const [, key] of imageKinds) if (cfg[key]) { try { logoUrls[cfg[key]] = await blobUrl(`${base}/assets/${cfg[key]}`); } catch { } }
+  const imagesBox = h('div', {});
+  const renderImages = () => imagesBox.replaceChildren(...imageKinds.map(([kind, key, label, help]) => h('div', { style: 'margin:10px 0;padding:8px;border:1px solid #ffffff22;border-radius:8px' },
+    h('label', {}, label), h('div', { class: 'muted', style: 'font-size:12px' }, help + ' • PNG/JPEG até 2 MB'),
+    h('div', { class: 'row', style: 'align-items:center;gap:8px;margin-top:6px' },
+      imgUrl(cfg[key]) ? h('img', { src: imgUrl(cfg[key]), alt: '', style: 'max-height:48px;max-width:120px;background:#fff2;border-radius:4px' }) : h('span', { class: 'muted' }, 'padrão do produto'),
+      h('input', { type: 'file', accept: 'image/png,image/jpeg', onchange: e => upload(kind, e.target) }),
+      cfg[key] ? h('button', { class: 'btn secondary', onclick: () => { cfg[key] = null; renderPreview(); renderImages(); msg.textContent = 'Imagem removida do rascunho (volta ao padrão ao publicar).'; } }, 'Remover') : null))));
+  renderImages();
 
   const save = async () => { try { await call('PUT', base + '/draft', cfg); msg.textContent = 'Rascunho salvo.'; } catch (e) { msg.textContent = e.message; } };
   const publish = async () => {
@@ -390,16 +557,15 @@ async function brandingEditor(d) {
 
   const form = h('div', {},
     h('label', {}, 'Tema predefinido'),
-    h('select', { onchange: e => { const p = presets.find(x => x.theme === e.target.value); if (!p) return; cfg = { ...p, systemName: cfg.systemName, companyName: cfg.companyName, logoAssetId: cfg.logoAssetId, logoDarkAssetId: cfg.logoDarkAssetId, iconAssetId: cfg.iconAssetId, splashAssetId: cfg.splashAssetId }; Object.entries(inputs).forEach(([k, el]) => el.value = cfg[k] ?? ''); renderPreview(); } },
+    h('select', { onchange: e => { const p = presets.find(x => x.theme === e.target.value); if (!p) return; const keep = {}; for (const [k] of textFields) keep[k] = cfg[k]; for (const [, key] of imageKinds) keep[key] = cfg[key]; cfg = { ...p, ...keep }; Object.entries(inputs).forEach(([k, el]) => el.value = cfg[k] ?? ''); renderPreview(); } },
       h('option', { value: '' }, 'Aplicar tema...'), presets.map(p => h('option', { value: p.theme }, p.theme))),
-    textFields.map(([k, l]) => [h('label', {}, l), bind(k, h('input', { maxlength: k === 'systemName' ? '60' : '200' }))]),
+    textFields.map(([k, l, max]) => [h('label', {}, l), bind(k, h('input', { maxlength: String(max) }))]),
     h('div', { class: 'grid', style: 'grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px' },
       colorFields.map(([k, l]) => h('div', {}, h('label', {}, l), bind(k, h('input', { type: 'color' }))))),
     h('div', { class: 'grid', style: 'grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px' },
       selects.map(([k, l, opts]) => h('div', {}, h('label', {}, l), bind(k, h('select', {}, opts.map(o => h('option', { value: o }, o))))))),
     h('label', {}, 'Escala do texto (0,85 a 1,3)'), bind('fontScale', h('input', { type: 'number', min: '0.85', max: '1.3', step: '0.05' }), Number),
-    ['logo', 'logo_dark', 'icon', 'splash'].map(kind => [h('label', {}, 'Imagem: ' + kind + ' (PNG/JPEG até 2 MB)'),
-      h('input', { type: 'file', accept: 'image/png,image/jpeg', onchange: e => upload(kind, e.target) })]),
+    h('h3', {}, 'Imagens e ícones'), imagesBox,
     h('div', { class: 'row', style: 'margin-top:12px' },
       h('button', { class: 'btn secondary', onclick: save }, 'Salvar rascunho'),
       h('button', { class: 'btn secondary', onclick: async () => { try { await call('POST', base + '/preview', cfg); msg.textContent = 'Configuração válida (nada foi publicado).'; } catch (e) { msg.textContent = e.message; } } }, 'Validar prévia'),
@@ -573,11 +739,7 @@ async function invoicesView() {
           h('td', {}, money(r.amountCents)), h('td', {}, dt(r.dueAt)),
           h('td', {}, h('span', { class: 'pill ' + (r.overdue ? 'bad' : r.daysToDue <= 3 ? 'warn' : '') }, r.overdue ? `vencida há ${-r.daysToDue} dia(s)` : r.daysToDue <= 0 ? 'vence hoje' : `vence em ${r.daysToDue} dia(s)`)),
           h('td', {}, [r.hasPix ? 'PIX gerado' : null, r.hasCheckout ? 'link cartão/boleto' : null].filter(Boolean).join(' • ') || '—', r.reminderSentAt ? h('div', { class: 'muted' }, 'lembrete enviado') : null),
-          h('td', {}, h('button', { class: 'btn secondary', onclick: async () => {
-            const c = await confirmDialog({ title: 'Baixar fatura manualmente', text: `Use só se o pagamento entrou fora do Mercado Pago (ex.: transferência). ${r.tradeName} • ${money(r.amountCents)}.`, tenantCode: r.code, totp: true, reason: true });
-            if (!c) return;
-            try { await call('POST', `/admin/v1/invoices/${r.id}/mark-paid`, { confirmTenantCode: c.code, reason: c.reason }, { 'X-Reauth-Totp': c.totp }); render(); } catch (e) { alert(e.message); }
-          } }, 'Marcar como paga')))))))
+          h('td', {}, invoiceActions({ ...r, status: 1 }, { tradeName: r.tradeName, code: r.code })))))))
   ];
 }
 
@@ -660,8 +822,123 @@ async function emailView() {
   ];
 }
 
+// ---------- WhatsApp de atendimento (botão flutuante no caixa) ----------
+async function contactView() {
+  const s = await call('GET', '/admin/v1/settings/support');
+  const err = h('div', { class: 'error' });
+  const num = h('input', { value: s.whatsapp || '', placeholder: '(47) 99284-1812', style: 'width:240px' });
+  const msg = h('input', { value: s.message || '', placeholder: 'Mensagem que já vem escrita no WhatsApp' });
+  const fmt = n => n && n.length >= 12 ? `+${n.slice(0, 2)} (${n.slice(2, 4)}) ${n.slice(4, -4)}-${n.slice(-4)}` : n;
+  const save = async (off) => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: off ? 'Desligar botão do WhatsApp' : 'Salvar número do WhatsApp', text: off ? 'O botão some dos caixas no próximo início.' : 'Os caixas passam a abrir conversa com este número.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/support', { whatsapp: off ? '' : num.value, message: msg.value }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return h('div', { class: 'card' }, h('h2', {}, 'WhatsApp de atendimento'),
+    h('p', {}, 'Situação: ', h('span', { class: 'pill ' + (s.enabled ? 'ok' : 'warn') }, s.enabled ? 'ativo • ' + fmt(s.whatsapp) : 'desligado')),
+    h('p', { class: 'muted' }, 'Número do botão verde flutuante que aparece no caixa (também na tela de login). Ao clicar, abre o WhatsApp com a mensagem abaixo, o nome da loja e o usuário. Os caixas atualizam o número ao abrir o programa.'),
+    h('div', { class: 'grid' }, h('div', {}, h('label', {}, 'Número (DDD + número)'), num), h('div', {}, h('label', {}, 'Mensagem inicial'), msg)),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: () => save(false) }, 'Salvar'),
+      s.enabled ? h('button', { class: 'btn secondary', onclick: () => save(true) }, 'Desligar botão') : null,
+      s.enabled ? h('a', { class: 'btn secondary', href: 'https://wa.me/' + s.whatsapp, target: '_blank', rel: 'noopener noreferrer' }, 'Testar') : null), err);
+}
+
+// ---------- Minha conta (e-mail e senha do administrador) ----------
+async function accountView() {
+  const me = state.me || await call('GET', '/admin/v1/me');
+  const errE = h('div', { class: 'error' }), errP = h('div', { class: 'error' });
+  const email = h('input', { type: 'email', value: me.email, autocomplete: 'off' });
+  const curE = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Senha atual' });
+  const curP = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Senha atual' });
+  const nw = h('input', { type: 'password', autocomplete: 'new-password', placeholder: '10+ caracteres com letras e números' });
+  const nw2 = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Repita a nova senha' });
+  const done = (what) => logout(`${what} alterado(a). Entre de novo com os dados novos (as outras sessões foram encerradas).`);
+  const saveEmail = async () => {
+    errE.textContent = '';
+    const c = await confirmDialog({ title: 'Trocar e-mail de login', text: `O novo e-mail de login será ${email.value}.`, totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/me/email', { newEmail: email.value, currentPassword: curE.value }, { 'X-Reauth-Totp': c.totp }); done('E-mail'); }
+    catch (e) { errE.textContent = e.message; }
+  };
+  const savePassword = async () => {
+    errP.textContent = '';
+    if (nw.value !== nw2.value) { errP.textContent = 'As duas senhas novas não são iguais.'; return; }
+    const c = await confirmDialog({ title: 'Trocar senha', text: 'Depois da troca você entra de novo com a senha nova.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/me/password', { currentPassword: curP.value, newPassword: nw.value }, { 'X-Reauth-Totp': c.totp }); done('Senha'); }
+    catch (e) { errP.textContent = e.message; }
+  };
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Trocar e-mail de login'),
+      h('label', {}, 'Novo e-mail'), email, h('label', {}, 'Senha atual'), curE,
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: saveEmail }, 'Salvar e-mail')), errE),
+    h('div', { class: 'card' }, h('h2', {}, 'Trocar senha'),
+      h('label', {}, 'Senha atual'), curP, h('label', {}, 'Nova senha'), nw, h('label', {}, 'Repita a nova senha'), nw2,
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: savePassword }, 'Salvar senha')), errP),
+    h('div', { class: 'card' }, h('p', { class: 'muted' }, 'As duas trocas pedem a senha atual e o código do autenticador, e encerram as outras sessões abertas do painel. O código do autenticador continua o mesmo.')),
+  ];
+}
+
+// ---------- App do Google (OAuth) para conectar o Google Drive pessoal ----------
+async function googleView() {
+  const s = await call('GET', '/admin/v1/settings/google-oauth');
+  const err = h('div', { class: 'error' });
+  const id = h('input', { value: s.clientId || '', placeholder: '1234567890-xxxx.apps.googleusercontent.com' });
+  const secret = h('input', { type: 'password', autocomplete: 'new-password', placeholder: s.hasSecret ? 'Configurado — preencha só para trocar' : 'GOCSPX-...' });
+  const redirect = h('input', { value: s.redirectUri, readonly: true, onclick: e => e.target.select() });
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Salvar app do Google', text: 'O segredo fica guardado criptografado e nunca é exibido de volta.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/google-oauth', { clientId: id.value, clientSecret: secret.value || null }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'App do Google (Google Drive pessoal)'),
+      h('p', {}, 'Situação: ', h('span', { class: 'pill ' + (s.configured ? 'ok' : 'warn') }, s.configured ? 'configurado' : 'não configurado')),
+      h('label', {}, 'Endereço de retorno (copie e cadastre no Google)'), redirect,
+      h('label', {}, 'Client ID'), id, h('label', {}, 'Segredo do cliente (Client secret)'), secret,
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Salvar')), err),
+    h('div', { class: 'card' }, h('h2', {}, 'Passo a passo (uma vez só)'),
+      h('ol', {},
+        h('li', {}, 'Entre em console.cloud.google.com com a sua conta Google e crie um projeto (ex.: "Sistema Comercial").'),
+        h('li', {}, 'APIs e serviços → Biblioteca → procure "Google Drive API" → Ativar.'),
+        h('li', {}, 'APIs e serviços → Tela de permissão OAuth (Google Auth Platform): tipo "Externo", nome do app, seu e-mail de suporte e de contato. Em "Público", clique em "Publicar app" (com o app em teste a conexão expira em 7 dias). Os escopos usados (e-mail e drive.file) não exigem verificação do Google.'),
+        h('li', {}, 'APIs e serviços → Credenciais → Criar credenciais → ID do cliente OAuth → tipo "Aplicativo da Web". Em "URIs de redirecionamento autorizados" cole o endereço de retorno acima.'),
+        h('li', {}, 'Copie o Client ID e o segredo (Client secret) para os campos acima e salve.'),
+        h('li', {}, 'Empresas → abra a empresa → Armazenamento → "Conectar minha conta Google".')),
+      h('p', { class: 'muted' }, 'Em produção o endereço de retorno muda para https://api.seudominio.com.br/oauth/google/callback: cadastre os dois no Google.')),
+  ];
+}
+
 // ---------- Versão do caixa (atualização automática) ----------
+async function mobileReleaseCard() {
+  const r = await call('GET', '/admin/v1/settings/mobile-release');
+  const err = h('div', { class: 'error' });
+  const code = h('input', { type: 'number', min: 1, value: r?.versionCode || '', placeholder: '2', style: 'width:120px' });
+  const name = h('input', { value: r?.versionName || '', placeholder: '1.0.1', style: 'width:140px' });
+  const url = h('input', { value: r?.url || '', placeholder: 'https://github.com/.../comercial-1.0.1.apk' });
+  const notes = h('input', { value: r?.notes || '', placeholder: 'O que mudou (aparece no aviso do app)' });
+  const mandatory = h('input', { type: 'checkbox' }); mandatory.checked = !!r?.mandatory;
+  const save = async () => {
+    err.textContent = '';
+    const c = await confirmDialog({ title: 'Publicar app ' + name.value, text: 'Os celulares com versão menor passam a mostrar "Nova versão" ao abrir o app.', totp: true });
+    if (!c) return;
+    try { await call('PUT', '/admin/v1/settings/mobile-release', { versionCode: +code.value, versionName: name.value, url: url.value, notes: notes.value, mandatory: mandatory.checked }, { 'X-Reauth-Totp': c.totp }); render(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return h('div', { class: 'card' }, h('h2', {}, 'App Android (celular do dono)'),
+    h('p', {}, 'Versão publicada: ', h('span', { class: 'pill ' + (r ? 'ok' : 'warn') }, r ? `${r.versionName} (código ${r.versionCode})` : 'nenhuma')),
+    h('p', { class: 'muted' }, 'O jeito fácil: rode dev/build-apk.ps1 -Publish -Notes "..." — ele gera o APK, sobe a versão e publica aqui sozinho. Para produção, suba o APK em HTTPS (ex.: GitHub Releases) e preencha abaixo. O código da versão precisa ser maior que o do app instalado.'),
+    h('div', { class: 'grid' }, h('div', {}, h('label', {}, 'Código da versão (versionCode)'), code, h('label', {}, 'Versão'), name, h('label', {}, 'Endereço do APK'), url),
+      h('div', {}, h('label', {}, 'Novidades'), notes, h('label', { class: 'row' }, mandatory, ' Obrigatória'))),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Publicar versão do app')), err);
+}
+
 async function releasesView() {
+  const mobile = await mobileReleaseCard();
   const r = await call('GET', '/admin/v1/settings/desktop-release');
   const err = h('div', { class: 'error' });
   const ver = h('input', { value: r?.version || '', placeholder: '1.0.1', style: 'width:140px' });
@@ -676,12 +953,12 @@ async function releasesView() {
     try { await call('PUT', '/admin/v1/settings/desktop-release', { version: ver.value, url: url.value, sha256: sha.value, notes: notes.value, mandatory: mandatory.checked }, { 'X-Reauth-Totp': c.totp }); render(); }
     catch (e) { err.textContent = e.message; }
   };
-  return h('div', { class: 'card' }, h('h2', {}, 'Atualização dos caixas'),
+  return [mobile, h('div', { class: 'card' }, h('h2', {}, 'Atualização dos caixas'),
     h('p', {}, 'Versão publicada: ', h('span', { class: 'pill ' + (r ? 'ok' : 'warn') }, r ? r.version : 'nenhuma')),
     h('p', { class: 'muted' }, '1) Rode dev/publish-pdv.ps1 (gera o instalador e mostra o SHA-256). 2) Suba o .exe num endereço HTTPS (ex.: GitHub Releases). 3) Preencha abaixo. Os dados são assinados com a chave das licenças e o caixa confere o arquivo antes de instalar.'),
     h('div', { class: 'grid' }, h('div', {}, h('label', {}, 'Versão'), ver, h('label', {}, 'Endereço do instalador (HTTPS)'), url),
       h('div', {}, h('label', {}, 'SHA-256 do instalador'), sha, h('label', {}, 'Novidades'), notes, h('label', { class: 'row' }, mandatory, ' Obrigatória (instala mesmo com vendas na fila)'))),
-    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Publicar versão')), err);
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: save }, 'Publicar versão')), err)];
 }
 
 // ---------- NFS-e das mensalidades ----------
@@ -767,7 +1044,7 @@ async function diagnosticsView() {
 async function render(msg) {
   const root = document.getElementById('app');
   if (!state.token) { root.replaceChildren(loginView(msg)); linkLabels(root); return; }
-  const nav = [['tenants', 'Empresas'], ['invoices', 'Faturas'], ['payments', 'Pagamentos'], ['email', 'E-mail'], ['nfse', 'NFS-e'], ['releases', 'Atualizações'], ['plans', 'Planos'], ['diagnostics', 'Diagnóstico']];
+  const nav = [['tenants', 'Empresas'], ['invoices', 'Faturas'], ['payments', 'Pagamentos'], ['email', 'E-mail'], ['nfse', 'NFS-e'], ['contact', 'WhatsApp'], ['google', 'Google'], ['releases', 'Atualizações'], ['account', 'Minha conta'], ['plans', 'Planos'], ['diagnostics', 'Diagnóstico']];
   const header = h('header', {}, h('h1', {}, 'Painel do Desenvolvedor'),
     h('nav', {}, nav.map(([k, l]) => h('button', { class: state.view === k ? 'active' : '', onclick: () => { state.view = k; state.tenantId = null; render(); } }, l))),
     h('div', { class: 'spacer' }), h('span', { class: 'muted' }, `${state.me.email} (${state.me.role})`),
@@ -779,7 +1056,7 @@ async function render(msg) {
   parts.push(main);
   root.replaceChildren(...parts);
   try {
-    const views = { tenants: tenantsView, new: newTenantView, tenant: tenantView, invoices: invoicesView, payments: paymentsView, email: emailView, nfse: nfseView, releases: releasesView, plans: plansView, diagnostics: diagnosticsView };
+    const views = { tenants: tenantsView, new: newTenantView, tenant: tenantView, invoices: invoicesView, payments: paymentsView, email: emailView, nfse: nfseView, contact: contactView, google: googleView, releases: releasesView, account: accountView, plans: plansView, diagnostics: diagnosticsView };
     const content = await views[state.view]();
     main.replaceChildren(...[].concat(content));
     linkLabels(main);

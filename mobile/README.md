@@ -1,30 +1,37 @@
-# App do proprietário (Flutter — Android e iOS)
+# App do proprietário (Flutter — Android)
 
-> **Status: código-fonte NÃO compilado.** O Flutter SDK não estava instalado no ambiente em que este
-> código foi escrito. Antes de usar: instale o Flutter estável, rode `flutter create . --platforms=android,ios`
-> nesta pasta (gera as pastas nativas sem sobrescrever `lib/`), depois `flutter analyze` e `flutter test`.
+Compilado e testado em 25/10/2026: Flutter 3.47.8, `flutter analyze` sem problemas, `flutter test` aprovado,
+APK de produção assinado. Ferramentas instaladas em `E:\dev-tools` (Flutter, JDK 17, Android SDK).
 
-## Executar
+## Gerar e atualizar (um comando)
 ```
-flutter pub get
-flutter run --dart-define=API_BASE_URL=https://api.seudominio.com.br
+powershell -ExecutionPolicy Bypass -File dev\build-apk.ps1 -Publish -Notes "O que mudou"
 ```
-No emulador Android, a API local de desenvolvimento fica em `http://10.0.2.2:5080` (padrão).
+- Sobe a versão no `pubspec.yaml` (1.0.1+2 → 1.0.2+3), gera o APK assinado e copia para `artifacts\`.
+- `-Publish`: coloca o APK para download no servidor (`/downloads/...`) e publica a versão no painel
+  (Atualizações → App Android). Ao abrir, os celulares com versão menor mostram **"Nova versão — Atualizar"**.
+- Padrão do app: IP deste computador na rede local, porta 5080. Para produção: `-ApiUrl https://api.seudominio.com.br`.
+
+**Chave de assinatura**: `mobile/android/upload-keystore.jks` + `mobile/android/key.properties` (fora do Git).
+Faça backup: o Android só instala uma versão por cima da outra se a chave for a mesma.
+
+## Testar no celular pela rede local
+1. Computador e celular no mesmo roteador/Wi-Fi. API aberta (`dev\run-api.ps1` já escuta em `0.0.0.0:5080`).
+2. Firewall do Windows liberando a porta 5080 para a rede local (uma vez, PowerShell **como administrador**):
+   `New-NetFirewallRule -DisplayName "Comercial API (rede local)" -Direction Inbound -Protocol TCP -LocalPort 5080 -RemoteAddress LocalSubnet -Action Allow`
+3. No celular, abra no navegador `http://IP-DO-COMPUTADOR:5080/downloads/comercial-X.Y.Z.apk` e instale
+   (o Android pede para permitir "instalar apps desta fonte").
+4. Se o IP do computador mudar: tela de login → "Servidor" → novo endereço → "Salvar e testar conexão".
 
 ## O que existe
-- Login com código da empresa, e-mail e senha; refresh token no armazenamento seguro (Keychain/Keystore).
-- Dashboard (`/api/v1/mobile/dashboard`): vendas do dia/mês, caixas abertos, estoque baixo, licença,
-  última sincronização — com aviso de dados desatualizados.
-- Identidade visual dinâmica por empresa (`/api/v1/branding`), com tema claro/escuro; a identidade é
-  limpa no logout/troca de conta para não vazar entre empresas.
-- Todas as regras (módulo `app_proprietario`, permissão `reports.read`, licença) são validadas no servidor.
-
-- Aba **Estoque**: lista com fotos, entrada de mercadoria e **cadastro de produto pela câmera** (foto reduzida no aparelho).
-- Aba **Avisos**: quebra de caixa e outros avisos; push via Firebase (ver `docs/OPERACAO.md`).
-  Para o push funcionar: `google-services.json` (Android) e `GoogleService-Info.plist` + chave APNs (iOS).
-  Permissões: câmera e galeria (`NSCameraUsageDescription`/`NSPhotoLibraryUsageDescription` no iOS).
+- Login (código da empresa, e-mail, senha e código do autenticador quando a 2FA estiver ligada); refresh token no Keystore.
+- Painel: vendas do dia/mês, caixas abertos, estoque baixo, licença, última sincronização.
+- Estoque: lista com fotos, entrada de mercadoria e cadastro de produto pela câmera.
+- Avisos: quebra de caixa e outros avisos.
+- Botão do WhatsApp de atendimento (número do painel admin) e aviso de atualização.
+- HTTP só é aceito na rede local (IPs privados); fora dela o app exige HTTPS.
 
 ## Pendências
-- Nome e ícone nativos do app são do produto; ícone/nome por cliente exigem builds separados (flavors).
-- Telas de estoque, caixa, horários e relatórios detalhados.
-- Testes de widget.
+- Push (Firebase): precisa do `google-services.json` do seu projeto Firebase; sem ele os avisos ficam só na aba Avisos.
+- iOS não gerado (exige Mac).
+- Emulador não testado neste PC (virtualização do Windows desligada); validado por testes, análise e chamadas reais pela rede.

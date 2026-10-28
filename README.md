@@ -40,6 +40,8 @@ Cliente Windows: compile `src/Comercial.Desktop` e coloque um `desktop.json` ao 
 `{ "ApiBaseUrl": "http://localhost:5080" }`. No primeiro acesso, entre com um usuário proprietário/gerente
 para ativar o terminal.
 
+node dev/totp.js
+
 ## Produção (resumo)
 `Database:Provider=Postgres`, `ConnectionStrings:Main`, `Jwt:TenantSigningKey`, `Jwt:AdminSigningKey`,
 `License:PrivateKeyPem`, `DataProtection:KeysPath`, `Payments:<provedor>:WebhookSecret`,

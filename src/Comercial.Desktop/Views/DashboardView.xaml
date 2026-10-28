@@ -17,9 +17,9 @@
                         <DockPanel Margin="0,0,0,16">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                 <Rectangle Width="12" Height="12" RadiusX="3" RadiusY="3" Fill="{DynamicResource AccentBrush}" Margin="0,0,6,0"/>
-                                <TextBlock Text="Vendas" Style="{StaticResource Muted}" Margin="0,0,16,0"/>
+                                <TextBlock Text="Faturamento" Style="{StaticResource Muted}" Margin="0,0,16,0"/>
                                 <Rectangle Width="12" Height="12" RadiusX="3" RadiusY="3" Fill="{DynamicResource PrimaryBrush}" Margin="0,0,6,0"/>
-                                <TextBlock Text="Lucro bruto" Style="{StaticResource Muted}"/>
+                                <TextBlock Text="Lucro (vendas − custo)" Style="{StaticResource Muted}"/>
                             </StackPanel>
                             <TextBlock Text="Últimos 14 dias" Style="{StaticResource SectionTitle}"/>
                         </DockPanel>

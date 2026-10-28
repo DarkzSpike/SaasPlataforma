@@ -66,7 +66,7 @@ public sealed class LocalDatabase
     /// primeiro uso; por isso ele é tocado antes e o provedor é trocado em seguida (sem chave o SQLCipher se
     /// comporta como SQLite comum, então outros bancos do mesmo processo continuam funcionando).
     /// </summary>
-    private static void EnsureCipherProvider()
+    public static void EnsureCipherProvider()
     {
         lock (ProviderLock)
         {

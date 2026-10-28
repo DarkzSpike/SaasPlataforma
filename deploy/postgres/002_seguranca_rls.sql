@@ -2,8 +2,9 @@
 -- Camada adicional de isolamento (defesa em profundidade) para PostgreSQL.
 -- Aplicar DEPOIS de 001_inicial.sql, com um usuário administrador do banco.
 --
--- STATUS: escrito, NÃO EXECUTADO no ambiente de desenvolvimento original (sem PostgreSQL).
--- Validar em homologação: rodar a suíte de testes contra PostgreSQL com o usuário app_comercial.
+-- STATUS: aplicado a cada execução da suíte PostgreSQL (dev/test-pg.ps1) e no banco de desenvolvimento
+-- (dev/run-api.ps1). A API conecta como app_comercial: sem superusuário, sem CREATEROLE/CREATEDB, sem
+-- BYPASSRLS, sem DDL e sem DELETE fora das tabelas listadas abaixo.
 --
 -- Modelo:
 --  * A aplicação conecta como app_comercial (NÃO é dono das tabelas -> RLS se aplica).
@@ -44,7 +45,8 @@ BEGIN
     'stock_balances','sales','sale_items','payments','cash_sessions','cash_movements','store_hours',
     'operating_events','fiscal_documents','fiscal_events','sync_events','support_sessions','support_elevation_requests',
     'notifications','push_tokens','suppliers','purchase_orders','purchase_items','purchase_receipts',
-    'customers','loyalty_programs','loyalty_transactions','financial_titles','sale_returns','sale_return_items','tenant_storage_settings','discount_authorizations','password_reset_tokens','tenant_payment_settings','pos_pix_charges','tenant_fiscal_profiles','fiscal_number_voids','product_barcodes','product_components','promotions','quotes','quote_items','product_batches','stock_transfers','stock_transfer_items','imported_invoices']
+    'customers','loyalty_programs','loyalty_transactions','financial_titles','sale_returns','sale_return_items','tenant_storage_settings','discount_authorizations','password_reset_tokens','tenant_payment_settings','pos_pix_charges','tenant_fiscal_profiles','fiscal_number_voids','product_barcodes','product_components','promotions','quotes','quote_items','product_batches','stock_transfers','stock_transfer_items','imported_invoices',
+    'fiscal_xml_files','fiscal_exports','fiscal_month_closings','accountant_settings','accountant_deliveries']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
@@ -66,4 +68,4 @@ CREATE TRIGGER trg_audit_logs_immutable BEFORE UPDATE OR DELETE ON audit_logs
 -- Movimentações financeiras e de estoque: sem UPDATE/DELETE para a aplicação.
 REVOKE UPDATE, DELETE ON stock_movements, cash_movements, sale_items, payments, operating_events,
   fiscal_events, sync_events, payment_events, branding_versions,
-  loyalty_transactions, purchase_receipts, sale_returns, sale_return_items FROM app_comercial;
+  loyalty_transactions, purchase_receipts, sale_returns, sale_return_items, fiscal_xml_files FROM app_comercial;

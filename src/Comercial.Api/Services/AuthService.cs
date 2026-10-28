@@ -1,3 +1,4 @@
+using Comercial.Domain.Security;
 using Comercial.Api.Security;
 using Comercial.Domain;
 using Comercial.Infrastructure.Data;
@@ -8,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Comercial.Api.Services;
 
 public sealed record AdminLoginRequest(string Email, string Password, string TotpCode);
+public sealed record AdminChangeEmailRequest(string NewEmail, string CurrentPassword);
+public sealed record AdminChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 public sealed class AuthService(
     AppDbContext db, TenantContext tenantCtx, PasswordHasher hasher, TokenService tokens, AuditService audit,
@@ -19,7 +22,8 @@ public sealed class AuthService(
 
     private static DomainException Invalid() => new("invalid_credentials", "Credenciais inválidas.", 401);
 
-    public async Task<TokenResponse> LoginAsync(LoginRequest r)
+    /// <param name="mobileClient">Pedido feito pelo app do celular (cabeçalho X-Client-App: mobile).</param>
+    public async Task<TokenResponse> LoginAsync(LoginRequest r, bool mobileClient = false)
     {
         var now = clock.GetUtcNow();
         var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Code == (r.TenantCode ?? "").Trim().ToLower());
@@ -61,6 +65,13 @@ public sealed class AuthService(
             user.TotpLastStep = step;
         }
 
+        if (mobileClient && !await HasPermissionAsync(user, Permissions.MobileAccess))
+        {
+            audit.Add("security.mobile_denied", tenant.Id, nameof(User), user.Id, null, "denied");
+            await db.SaveChangesAsync();
+            throw new DomainException("mobile_not_allowed", "Seu usuário não tem acesso ao app do celular. Peça ao dono da loja para liberar.", 403);
+        }
+
         if (r.DeviceId is { } did && !await db.Devices.AnyAsync(d => d.Id == did && d.Status == DeviceStatus.Active))
         {
             await audit.WriteNowAsync("security.login_revoked_device", tenant.Id, nameof(Device), did);
@@ -75,6 +86,13 @@ public sealed class AuthService(
         audit.Add("auth.login", tenant.Id, nameof(User), user.Id, new { r.DeviceId });
         await db.SaveChangesAsync();
         return new TokenResponse(tokens.IssueTenantAccess(user.Id, tenant.Id, session.Id, r.DeviceId), refresh, tokens.TenantAccessMinutes * 60);
+    }
+
+    private async Task<bool> HasPermissionAsync(User user, string permission)
+    {
+        var roles = await db.UserRoles.Where(x => x.UserId == user.Id).Select(x => x.Role).ToListAsync();
+        var grants = await db.UserPermissionGrants.Where(g => g.UserId == user.Id).Select(g => new { g.Permission, g.Granted }).ToListAsync();
+        return Permissions.Resolve(roles, grants.Select(g => (g.Permission, g.Granted))).Contains(permission);
     }
 
     /// <summary>
@@ -179,6 +197,51 @@ public sealed class AuthService(
         audit.Add("admin.login", null, nameof(AdminUser), admin.Id);
         await db.SaveChangesAsync();
         return tokens.IssueAdminAccess(admin.Id, admin.Role);
+    }
+
+    /// <summary>Confere a senha atual do admin logado (erros contam para o bloqueio, como no login).</summary>
+    private async Task<AdminUser> CurrentAdminWithPasswordAsync(string? password)
+    {
+        var now = clock.GetUtcNow();
+        var admin = await db.AdminUsers.FirstAsync(a => a.Id == actor.AdminId);
+        if (admin.LockoutUntil > now) throw new DomainException("account_locked", "Conta temporariamente bloqueada.", 423);
+        if (!hasher.Verify(password ?? "", admin.PasswordHash))
+        {
+            admin.FailedLoginCount++;
+            if (admin.FailedLoginCount >= MaxFailedAttempts) { admin.LockoutUntil = now + LockoutDuration; admin.FailedLoginCount = 0; }
+            audit.Add("security.admin_password_check_failed", null, nameof(AdminUser), admin.Id, null, "denied");
+            await db.SaveChangesAsync();
+            throw new DomainException("invalid_password", "Senha atual incorreta.", 401);
+        }
+        admin.FailedLoginCount = 0;
+        return admin;
+    }
+
+    /// <summary>Troca o e-mail de login do admin (senha atual + código do autenticador). Outras sessões caem.</summary>
+    public async Task AdminChangeEmailAsync(AdminChangeEmailRequest r)
+    {
+        var email = (r.NewEmail ?? "").Trim().ToLowerInvariant();
+        if (!System.Net.Mail.MailAddress.TryCreate(email, out _) || email.Length > 200) throw new DomainException("invalid_email", "E-mail inválido.");
+        var admin = await CurrentAdminWithPasswordAsync(r.CurrentPassword);
+        if (admin.Email == email) throw new DomainException("same_email", "Este já é o seu e-mail.");
+        if (await db.AdminUsers.AnyAsync(a => a.Email == email && a.Id != admin.Id)) throw new DomainException("email_taken", "Já existe um administrador com este e-mail.", 409);
+        var old = admin.Email;
+        admin.Email = email;
+        admin.CredentialsChangedAt = clock.GetUtcNow();
+        audit.Add("admin.email_changed", null, nameof(AdminUser), admin.Id, new { from = old, to = email });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Troca a senha do admin (senha atual + código do autenticador). Outras sessões caem.</summary>
+    public async Task AdminChangePasswordAsync(AdminChangePasswordRequest r)
+    {
+        if (PasswordHasher.ValidatePolicy(r.NewPassword ?? "") is { } pe) throw new DomainException("weak_password", pe);
+        var admin = await CurrentAdminWithPasswordAsync(r.CurrentPassword);
+        if (hasher.Verify(r.NewPassword!, admin.PasswordHash)) throw new DomainException("same_password", "A nova senha precisa ser diferente da atual.");
+        admin.PasswordHash = hasher.Hash(r.NewPassword!);
+        admin.CredentialsChangedAt = clock.GetUtcNow();
+        audit.Add("admin.password_changed", null, nameof(AdminUser), admin.Id);
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Reautenticação para operações críticas: exige código TOTP atual.</summary>

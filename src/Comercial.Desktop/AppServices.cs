@@ -87,13 +87,30 @@ public sealed class AppServices
         ReceiptPrinter.Devices = Settings.Devices;
     }
 
+    /// <summary>Produto de preço livre (valor digitado no caixa: "100=9,90"). Lista guardada no catálogo local.</summary>
+    public bool IsOpenPrice(Guid productId)
+    {
+        if (Db.Get("catalog.openprice") is not { } json) return false;
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(json)?.Contains(productId) == true; }
+        catch (System.Text.Json.JsonException) { return false; }
+    }
+
+    /// <summary>Imagem da identidade visual já baixada (cache no banco local criptografado).</summary>
+    public byte[]? BrandAsset(Guid id)
+    {
+        var b64 = Db.Get("brand.asset." + id.ToString("N"));
+        if (b64 is null) return null;
+        try { return Convert.FromBase64String(b64); } catch (FormatException) { return null; }
+    }
+
     public static string Money(long cents) => (cents / 100m).ToString("C", PtBr);
 
     /// <summary>
     /// Aplica a identidade visual publicada (ou a última válida em cache, se offline). Cores derivadas
     /// (tons claros/escuros) são calculadas aqui para manter os contrastes do tema.
     /// </summary>
-    public static void ApplyBranding(BrandingConfig cfg)
+    /// <param name="asset">Busca os bytes de uma imagem já baixada (cache local); null = sem imagem.</param>
+    public static void ApplyBranding(BrandingConfig cfg, Func<Guid, byte[]?>? asset = null)
     {
         if (BrandingRules.Validate(cfg).Count > 0) cfg = new BrandingConfig();
         var r = Application.Current.Resources;
@@ -150,5 +167,33 @@ public sealed class AppServices
         r["BrandFirst"] = cut > 0 ? name[..cut] + " " : name;
         r["BrandLast"] = cut > 0 ? name[(cut + 1)..] : "";
         r["WelcomeMessage"] = string.IsNullOrWhiteSpace(cfg.WelcomeMessage) ? "Bem-vindo!" : cfg.WelcomeMessage;
+
+        // Textos e imagens da empresa (white label). Sem imagem publicada, fica o visual padrão do produto.
+        static string Or(string? v, string d) => string.IsNullOrWhiteSpace(v) ? d : v.Trim();
+        var defaults = new BrandingConfig();
+        r["TaglineSpaced"] = string.Join(" ", Or(cfg.Tagline, defaults.Tagline).ToUpperInvariant().ToCharArray()).Replace("   ", "  ");
+        r["LoginSubtitle"] = Or(cfg.LoginSubtitle, defaults.LoginSubtitle);
+        r["HeaderSubtitle"] = Or(cfg.HeaderSubtitle, defaults.HeaderSubtitle);
+        r["Feature1"] = Or(cfg.Feature1, defaults.Feature1);
+        r["Feature2"] = Or(cfg.Feature2, defaults.Feature2);
+        r["Feature3"] = Or(cfg.Feature3, defaults.Feature3);
+        ImageSource? Img(Guid? id) => id is { } g && asset?.Invoke(g) is { Length: > 0 } bytes ? FormViewModel.Load(bytes, 0) : null;
+        var logo = Img(cfg.LogoAssetId);
+        var logoDark = Img(cfg.LogoDarkAssetId);
+        var icon = Img(cfg.IconAssetId);
+        var loginImage = Img(cfg.LoginImageAssetId);
+        var loginBg = Img(cfg.LoginBackgroundAssetId);
+        void Set(string key, ImageSource? img)
+        {
+            r[key] = img;
+            r["Has" + key] = img is null ? Visibility.Collapsed : Visibility.Visible;
+            r["No" + key] = img is null ? Visibility.Visible : Visibility.Collapsed;
+        }
+        Set("LogoOnDark", logoDark ?? logo);     // cabeçalho escuro e lado esquerdo do login
+        Set("LogoOnLight", logo ?? logoDark);    // cartão claro do login
+        Set("LoginImage", loginImage);
+        Set("LoginBackground", loginBg);
+        Set("BrandIcon", icon);
+        r["WindowIcon"] = icon ?? r["DefaultWindowIcon"];
     }
 }

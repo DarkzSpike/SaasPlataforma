@@ -112,3 +112,64 @@ public static class ReceiptEscPos
         return p.Cut().Build();
     }
 }
+
+public sealed record NfceDanfeItem(string Code, string Name, decimal Quantity, string Unit, long UnitCents, long TotalCents);
+public sealed record NfceDanfePayment(string Name, long Cents);
+/// <summary>Dados do DANFE NFC-e devolvidos pelo servidor depois da autorização na SEFAZ.</summary>
+public sealed record NfceDanfe(string Status, string Message, int? Number, int? Series, string? AccessKey, string? Protocol, DateTimeOffset? AuthorizedAt,
+    DateTimeOffset IssuedAt, bool Homologation, string? QrCode, string? ConsultUrl, string EmitterName, string EmitterCnpj, string? EmitterIe, string EmitterAddress,
+    List<NfceDanfeItem> Items, long SubtotalCents, long DiscountCents, long TotalCents, List<NfceDanfePayment> Payments, long ChangeCents)
+{
+    public bool Printable => Status is "autorizada" && !string.IsNullOrEmpty(AccessKey) && !string.IsNullOrEmpty(QrCode);
+    public static string FormatCnpj(string c) => c.Length == 14 ? $"{c[..2]}.{c[2..5]}.{c[5..8]}/{c[8..12]}-{c[12..]}" : c;
+    public static string GroupKey(string k) => string.Join(" ", Enumerable.Range(0, (k.Length + 3) / 4).Select(i => k.Substring(i * 4, Math.Min(4, k.Length - i * 4))));
+    public string Local(DateTimeOffset d) => d.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+}
+
+/// <summary>
+/// DANFE NFC-e em ESC/POS, na ordem do Manual de Padrões Técnicos do DANFE NFC-e: emitente, itens, totais, pagamento,
+/// consulta pela chave, consumidor, identificação/protocolo e QR Code.
+/// </summary>
+public static class DanfeEscPos
+{
+    private static string M(long c) => (c / 100m).ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+
+    public static byte[] Build(NfceDanfe d, int paperMm, bool openDrawer)
+    {
+        var p = new EscPosBuilder(paperMm);
+        if (openDrawer) p.OpenDrawer();
+        p.Align(1).Bold(true).Wrap(d.EmitterName).Bold(false)
+         .Line($"CNPJ {NfceDanfe.FormatCnpj(d.EmitterCnpj)}" + (d.EmitterIe is { Length: > 0 } ie ? $"  IE {ie}" : ""))
+         .Wrap(d.EmitterAddress)
+         .Line("Documento Auxiliar da Nota Fiscal").Line("de Consumidor Eletrônica").Align(0).Separator();
+        p.Columns2("Código Descrição", "Vl Total");
+        foreach (var i in d.Items)
+        {
+            var name = $"{i.Code} {i.Name}";
+            p.Line(name.Length > p.Columns ? name[..p.Columns] : name);
+            p.Columns2($"  {i.Quantity:0.###} {i.Unit} x {M(i.UnitCents)}", M(i.TotalCents));
+        }
+        p.Separator();
+        if (d.Homologation) p.Align(1).Bold(true).Wrap("EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO - SEM VALOR FISCAL").Bold(false).Align(0).Separator();
+        p.Columns2("Qtde. total de itens", d.Items.Count.ToString())
+         .Columns2("Valor total R$", M(d.SubtotalCents));
+        if (d.DiscountCents > 0) p.Columns2("Desconto R$", "-" + M(d.DiscountCents));
+        p.Bold(true).Columns2("Valor a Pagar R$", M(d.TotalCents)).Bold(false)
+         .Columns2("FORMA PAGAMENTO", "VALOR PAGO R$");
+        foreach (var pay in d.Payments) p.Columns2(pay.Name, M(pay.Cents));
+        if (d.ChangeCents > 0) p.Columns2("Troco R$", M(d.ChangeCents));
+        p.Separator().Align(1).Bold(true).Line("Consulte pela Chave de Acesso em").Bold(false)
+         .Wrap(d.ConsultUrl ?? "portal da SEFAZ do seu estado")
+         .Line(NfceDanfe.GroupKey((d.AccessKey ?? "").PadRight(44)[..24]).Trim())
+         .Line(NfceDanfe.GroupKey((d.AccessKey ?? "").PadRight(44)[24..]).Trim())
+         .Separator()
+         .Bold(true).Line("CONSUMIDOR NÃO IDENTIFICADO").Bold(false)
+         .Separator()
+         .Bold(true).Line($"NFC-e nº {d.Number:000000000} Série {d.Series:000}").Bold(false)
+         .Line(d.Local(d.IssuedAt))
+         .Line("Protocolo de autorização: " + d.Protocol);
+        if (d.AuthorizedAt is { } at) p.Line("Data de autorização: " + d.Local(at));
+        p.QrCode(d.QrCode!, (byte)(paperMm >= 80 ? 5 : 4)).Align(0);
+        return p.Cut().Build();
+    }
+}

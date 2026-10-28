@@ -74,6 +74,75 @@ public static class ReceiptPrinter
         return doc;
     }
 
+    /// <summary>DANFE NFC-e na impressora do Windows (mesma ordem do layout oficial), com o QR Code como imagem.</summary>
+    public static FlowDocument BuildDanfe(Comercial.Desktop.Core.Hardware.NfceDanfe d)
+    {
+        var doc = new FlowDocument { PageWidth = 300, PagePadding = new Thickness(10), FontFamily = new FontFamily("Consolas, Courier New"), FontSize = 10, ColumnWidth = 300 };
+        Paragraph P(string text, bool bold = false, TextAlignment align = TextAlignment.Left, double size = 10) =>
+            new(new Run(text)) { FontWeight = bold ? FontWeights.Bold : FontWeights.Normal, TextAlignment = align, FontSize = size, Margin = new Thickness(0, 1, 0, 1) };
+        string Money(long c) => (c / 100m).ToString("N2", AppServices.PtBr);
+        string Cols(string l, string r) => l.PadRight(Math.Max(1, 44 - r.Length)) + r;
+        var line = new string('-', 44);
+        doc.Blocks.Add(P(d.EmitterName, true, TextAlignment.Center, 11));
+        doc.Blocks.Add(P($"CNPJ {Comercial.Desktop.Core.Hardware.NfceDanfe.FormatCnpj(d.EmitterCnpj)}" + (d.EmitterIe is { Length: > 0 } ie ? $"  IE {ie}" : ""), align: TextAlignment.Center));
+        doc.Blocks.Add(P(d.EmitterAddress, align: TextAlignment.Center));
+        doc.Blocks.Add(P("Documento Auxiliar da Nota Fiscal de Consumidor Eletrônica", true, TextAlignment.Center));
+        doc.Blocks.Add(P(line));
+        foreach (var i in d.Items)
+        {
+            doc.Blocks.Add(P($"{i.Code} {i.Name}"));
+            doc.Blocks.Add(P(Cols($"  {i.Quantity:0.###} {i.Unit} x {Money(i.UnitCents)}", Money(i.TotalCents))));
+        }
+        doc.Blocks.Add(P(line));
+        if (d.Homologation) doc.Blocks.Add(P("EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO - SEM VALOR FISCAL", true, TextAlignment.Center));
+        doc.Blocks.Add(P(Cols("Qtde. total de itens", d.Items.Count.ToString())));
+        doc.Blocks.Add(P(Cols("Valor total R$", Money(d.SubtotalCents))));
+        if (d.DiscountCents > 0) doc.Blocks.Add(P(Cols("Desconto R$", "-" + Money(d.DiscountCents))));
+        doc.Blocks.Add(P(Cols("Valor a Pagar R$", Money(d.TotalCents)), true, size: 11));
+        doc.Blocks.Add(P(Cols("FORMA PAGAMENTO", "VALOR PAGO R$")));
+        foreach (var p in d.Payments) doc.Blocks.Add(P(Cols(p.Name, Money(p.Cents))));
+        if (d.ChangeCents > 0) doc.Blocks.Add(P(Cols("Troco R$", Money(d.ChangeCents))));
+        doc.Blocks.Add(P(line));
+        doc.Blocks.Add(P("Consulte pela Chave de Acesso em", true, TextAlignment.Center));
+        doc.Blocks.Add(P(d.ConsultUrl ?? "portal da SEFAZ do seu estado", align: TextAlignment.Center));
+        var key = (d.AccessKey ?? "").PadRight(44);
+        doc.Blocks.Add(P(Comercial.Desktop.Core.Hardware.NfceDanfe.GroupKey(key[..24]).Trim(), align: TextAlignment.Center));
+        doc.Blocks.Add(P(Comercial.Desktop.Core.Hardware.NfceDanfe.GroupKey(key[24..]).Trim(), align: TextAlignment.Center));
+        doc.Blocks.Add(P("CONSUMIDOR NÃO IDENTIFICADO", true, TextAlignment.Center));
+        doc.Blocks.Add(P($"NFC-e nº {d.Number:000000000} Série {d.Series:000} {d.Local(d.IssuedAt)}", true, TextAlignment.Center));
+        doc.Blocks.Add(P("Protocolo de autorização: " + d.Protocol, align: TextAlignment.Center));
+        if (d.AuthorizedAt is { } at) doc.Blocks.Add(P("Data de autorização: " + d.Local(at), align: TextAlignment.Center));
+        using (var gen = new QRCoder.QRCodeGenerator())
+        using (var data = gen.CreateQrCode(d.QrCode ?? "", QRCoder.QRCodeGenerator.ECCLevel.M))
+        {
+            var img = new Image { Source = FormViewModel.Load(new QRCoder.PngByteQRCode(data).GetGraphic(6), 0), Width = 150, Height = 150 };
+            doc.Blocks.Add(new BlockUIContainer(img) { Margin = new Thickness(0, 6, 0, 0) });
+        }
+        return doc;
+    }
+
+    /// <summary>Impressão do DANFE ao finalizar (térmica ESC/POS, se configurada). Devolve mensagem de erro ou null.</summary>
+    public static string? AutoPrintDanfe(Comercial.Desktop.Core.Hardware.NfceDanfe d)
+    {
+        if (!UseEscPos || !Devices.AutoPrint) return null;
+        try { RawPrinter.Send(Devices.PrinterName!, Comercial.Desktop.Core.Hardware.DanfeEscPos.Build(d, Devices.PaperMm, false), "NFC-e"); return null; }
+        catch (InvalidOperationException ex) { return "Impressora: " + ex.Message; }
+    }
+
+    public static void PrintDanfe(Comercial.Desktop.Core.Hardware.NfceDanfe d)
+    {
+        if (UseEscPos)
+        {
+            try { RawPrinter.Send(Devices.PrinterName!, Comercial.Desktop.Core.Hardware.DanfeEscPos.Build(d, Devices.PaperMm, false), "NFC-e"); return; }
+            catch (InvalidOperationException ex) { MessageBox.Show(ex.Message, "Impressora", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+        }
+        var dlg = new PrintDialog();
+        if (dlg.ShowDialog() != true) return;
+        var doc = BuildDanfe(d);
+        doc.PageWidth = Math.Min(dlg.PrintableAreaWidth, 300);
+        dlg.PrintDocument(((IDocumentPaginatorSource)doc).DocumentPaginator, "DANFE NFC-e");
+    }
+
     public static void Print(Receipt r)
     {
         if (UseEscPos)

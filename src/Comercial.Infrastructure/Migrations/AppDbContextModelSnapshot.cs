@@ -22,6 +22,112 @@ namespace Comercial.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Comercial.Domain.AccountantDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("EmailMessageIds")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid?>("FiscalExportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Recipients")
+                        .IsRequired()
+                        .HasMaxLength(1500)
+                        .HasColumnType("character varying(1500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Year", "Month", "Trigger");
+
+                    b.ToTable("accountant_deliveries", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.AccountantSettings", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoSend")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ContactName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("DayOfMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("ExtraEmails")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Hour")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IncludeReports")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IncludeXml")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("OfficeName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("accountant_settings", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.AdminUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -29,6 +135,9 @@ namespace Comercial.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CredentialsChangedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DisplayName")
@@ -488,6 +597,14 @@ namespace Comercial.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AttachmentName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("AttachmentPath")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
                     b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
@@ -634,6 +751,12 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<string>("AccessKey")
                         .HasColumnType("text");
 
+                    b.Property<int>("ArchiveAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("ArchiveNextAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
@@ -643,14 +766,23 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<string>("CancelReason")
                         .HasColumnType("text");
 
+                    b.Property<string>("CancelXmlUrl")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("CancelledAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ConsultUrl")
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DanfeUrl")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("EmissionAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Environment")
                         .HasColumnType("integer");
@@ -666,6 +798,9 @@ namespace Comercial.Infrastructure.Migrations
 
                     b.Property<int?>("Number")
                         .HasColumnType("integer");
+
+                    b.Property<string>("NumericCode")
+                        .HasColumnType("text");
 
                     b.Property<string>("Protocol")
                         .HasColumnType("text");
@@ -699,6 +834,10 @@ namespace Comercial.Infrastructure.Migrations
                     b.HasIndex("TenantId", "SaleId", "Model")
                         .IsUnique();
 
+                    b.HasIndex("TenantId", "Model", "Series", "Number")
+                        .IsUnique()
+                        .HasFilter("\"Number\" IS NOT NULL");
+
                     b.ToTable("fiscal_documents", (string)null);
                 });
 
@@ -727,9 +866,139 @@ namespace Comercial.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "FiscalDocumentId");
 
                     b.ToTable("fiscal_events", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.FiscalExport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DocumentCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("EventCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ManifestJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("MissingCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ReportCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid?>("StoreId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("VoidCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Year", "Month", "CreatedAt");
+
+                    b.ToTable("fiscal_exports", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.FiscalMonthClosing", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChecksJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("LastCheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastExportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("fiscal_month_closings", (string)null);
                 });
 
             modelBuilder.Entity("Comercial.Domain.FiscalNumberVoid", b =>
@@ -737,6 +1006,12 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<int>("ArchiveAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("ArchiveNextAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -767,11 +1042,79 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("XmlUrl")
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId");
 
                     b.ToTable("fiscal_number_voids", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.FiscalXmlFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccessKey")
+                        .HasMaxLength(44)
+                        .HasColumnType("character varying(44)");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid?>("FiscalDocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("Model")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("NumberVoidId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ReferenceAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("StoredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "NumberVoidId")
+                        .IsUnique()
+                        .HasFilter("\"NumberVoidId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ReferenceAt");
+
+                    b.HasIndex("TenantId", "FiscalDocumentId", "Kind")
+                        .IsUnique()
+                        .HasFilter("\"FiscalDocumentId\" IS NOT NULL");
+
+                    b.ToTable("fiscal_xml_files", (string)null);
                 });
 
             modelBuilder.Entity("Comercial.Domain.ImportedInvoice", b =>
@@ -1484,6 +1827,10 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<bool>("IsKit")
                         .HasColumnType("boolean");
 
+                    b.Property<decimal?>("MarkupPercent")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
                     b.Property<decimal>("MinStock")
                         .HasPrecision(18, 3)
                         .HasColumnType("numeric(18,3)");
@@ -1494,6 +1841,9 @@ namespace Comercial.Infrastructure.Migrations
 
                     b.Property<string>("Ncm")
                         .HasColumnType("text");
+
+                    b.Property<bool>("OpenPrice")
+                        .HasColumnType("boolean");
 
                     b.Property<Guid?>("ParentProductId")
                         .HasColumnType("uuid");
@@ -2755,6 +3105,10 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AddressNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<bool>("AutoEmit")
                         .HasColumnType("boolean");
 
@@ -2762,10 +3116,42 @@ namespace Comercial.Infrastructure.Migrations
                         .HasPrecision(7, 4)
                         .HasColumnType("numeric(7,4)");
 
+                    b.Property<string>("Cep")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("CertificateNotAfter")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CertificatePasswordProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CertificateProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CertificateSubject")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CertificateThumbprint")
+                        .HasColumnType("text");
+
+                    b.Property<int>("CityCode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CityName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Cnpj")
                         .IsRequired()
                         .HasMaxLength(14)
                         .HasColumnType("character varying(14)");
+
+                    b.Property<string>("CscId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CscProtected")
+                        .HasColumnType("text");
 
                     b.Property<string>("DefaultCfop")
                         .IsRequired()
@@ -2791,6 +3177,17 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("District")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EmissionMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("sempre");
+
                     b.Property<int>("Environment")
                         .HasColumnType("integer");
 
@@ -2798,8 +3195,18 @@ namespace Comercial.Infrastructure.Migrations
                         .HasPrecision(7, 4)
                         .HasColumnType("numeric(7,4)");
 
+                    b.Property<string>("LegalName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("NfceNextNumber")
+                        .HasColumnType("integer");
+
                     b.Property<int>("NfceSeries")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Phone")
+                        .HasColumnType("text");
 
                     b.Property<string>("Provider")
                         .IsRequired()
@@ -2809,12 +3216,22 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<string>("ProviderTokenProtected")
                         .HasColumnType("text");
 
+                    b.Property<int>("QrCodeVersion")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Regime")
                         .HasColumnType("integer");
 
                     b.Property<string>("StateRegistration")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Street")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TradeName")
+                        .HasColumnType("text");
 
                     b.Property<string>("Uf")
                         .IsRequired()
@@ -3098,6 +3515,24 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("user_sessions", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.AccountantDelivery", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.AccountantSettings", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.BrandingAsset", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
@@ -3218,7 +3653,34 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.FiscalExport", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.FiscalMonthClosing", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.FiscalNumberVoid", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.FiscalXmlFile", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
                         .WithMany()

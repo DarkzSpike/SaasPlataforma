@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'core/api_client.dart';
+import 'core/app_extras.dart';
 import 'core/branding.dart';
 import 'core/push.dart';
+import 'core/server_config.dart';
+import 'core/session.dart';
 import 'core/session_store.dart';
+import 'features/invoices.dart';
 import 'features/notifications.dart';
+import 'features/owner.dart';
 import 'features/products.dart';
-
-/// URL da API definida no build: flutter run --dart-define=API_BASE_URL=https://api.exemplo.com.br
-const apiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:5080');
 
 void main() => runApp(const ComercialApp());
 
@@ -20,20 +21,43 @@ class ComercialApp extends StatefulWidget {
 }
 
 class _ComercialAppState extends State<ComercialApp> {
-  final api = ApiClient(apiBaseUrl, SessionStore());
+  final server = ServerConfig();
+  final api = ApiClient(defaultApiBaseUrl, SessionStore());
   Branding branding = Branding.fallback();
   bool? loggedIn;
+  AppUpdate? update;
+  SupportContact? support;
+  String? tenantCode;
 
   @override
   void initState() {
     super.initState();
-    api.tryRestore().then((ok) async {
-      if (ok) {
-        await _loadBranding();
-        PushRegistration.register(api);
-      }
-      setState(() => loggedIn = ok);
-    });
+    _start();
+  }
+
+  Future<void> _start() async {
+    api.baseUrl = await server.read();
+    tenantCode = await api.store.readTenantCode();
+    _loadExtras();
+    final ok = await api.tryRestore().catchError((_) => false);
+    if (ok) {
+      await _loadBranding();
+      PushRegistration.register(api);
+    }
+    setState(() => loggedIn = ok);
+  }
+
+  /// Aviso de versão nova e WhatsApp de atendimento (funcionam sem login).
+  Future<void> _loadExtras() async {
+    final u = await AppUpdate.check(api);
+    final s = await SupportContact.load(api);
+    if (mounted) setState(() { update = u; support = s; });
+  }
+
+  Future<void> _onServerChanged(String url) async {
+    await server.save(url);
+    api.baseUrl = await server.read();
+    await _loadExtras();
   }
 
   Future<void> _loadBranding() async {
@@ -46,6 +70,7 @@ class _ComercialAppState extends State<ComercialApp> {
   }
 
   Future<void> _onLoggedIn() async {
+    tenantCode = await api.store.readTenantCode();
     setState(() => branding = Branding.fallback()); // limpa a identidade anterior antes de carregar a nova
     await _loadBranding();
     PushRegistration.register(api); // aviso de quebra de caixa no celular do dono
@@ -70,69 +95,118 @@ class _ComercialAppState extends State<ComercialApp> {
       themeMode: branding.themeMode,
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(branding.fontScale)),
-        child: child!,
+        child: Column(children: [
+          if (update != null) UpdateBanner(update: update!),
+          Expanded(child: child!),
+        ]),
       ),
       home: switch (loggedIn) {
         null => const Scaffold(body: Center(child: CircularProgressIndicator())),
-        false => LoginPage(api: api, branding: branding, onLoggedIn: _onLoggedIn),
-        true => HomeShell(api: api, branding: branding, onLogout: _onLogout),
+        false => LoginPage(api: api, branding: branding, onLoggedIn: _onLoggedIn, onServerChanged: _onServerChanged, support: support),
+        true => HomeShell(api: api, branding: branding, onLogout: _onLogout, support: support, tenantCode: tenantCode),
       },
     );
   }
 }
 
-/// Navegação principal do app do dono: Painel, Estoque (com cadastro pela câmera) e Avisos.
+/// Navegação principal. As abas dependem do usuário: o dono vê tudo; um funcionário liberado vê só o que as
+/// permissões dele deixam (ex.: estoquista → Produtos). O servidor confere de novo cada pedido.
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.api, required this.branding, required this.onLogout});
+  const HomeShell({super.key, required this.api, required this.branding, required this.onLogout, this.support, this.tenantCode});
   final ApiClient api;
   final Branding branding;
   final Future<void> Function() onLogout;
+  final SupportContact? support;
+  final String? tenantCode;
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
 class _HomeShellState extends State<HomeShell> {
   int index = 0;
+  Me? me;
   String? storeId;
+  String? error;
 
   @override
   void initState() {
     super.initState();
-    widget.api.getList('/api/v1/stores').then((s) {
-      if (s.isNotEmpty) setState(() => storeId = (s.first as Map<String, dynamic>)['id'] as String);
-    }).catchError((_) {});
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final m = await Me.load(widget.api);
+      final stores = await widget.api.getList('/api/v1/stores').catchError((_) => <dynamic>[]);
+      setState(() {
+        me = m;
+        storeId = stores.isEmpty ? null : (stores.first as Map<String, dynamic>)['id'] as String;
+        error = null;
+      });
+    } on ApiException catch (e) {
+      if (e.code == 'mobile_not_allowed') {
+        await widget.onLogout(); // o dono desligou o acesso deste usuário ao app
+        return;
+      }
+      setState(() => error = e.message);
+    } catch (_) {
+      setState(() => error = 'Sem conexão com o servidor.');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final pages = <Widget>[
-      DashboardPage(api: widget.api, branding: widget.branding, onLogout: widget.onLogout),
-      Scaffold(
-        appBar: AppBar(title: const Text('Estoque')),
-        body: storeId == null ? const Center(child: CircularProgressIndicator()) : ProductsPage(api: widget.api, storeId: storeId!),
-      ),
-      Scaffold(appBar: AppBar(title: const Text('Avisos')), body: NotificationsPage(api: widget.api)),
+    final m = me;
+    if (m == null) {
+      return Scaffold(body: Center(child: error == null
+          ? const CircularProgressIndicator()
+          : Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(error!), const SizedBox(height: 12),
+              FilledButton(onPressed: _load, child: const Text('Tentar de novo')),
+              TextButton(onPressed: widget.onLogout, child: const Text('Sair')),
+            ])));
+    }
+    final tabs = <({Widget page, NavigationDestination dest, bool fab})>[
+      if (m.seesDashboard)
+        (page: OwnerDashboardPage(api: widget.api, me: m, onLogout: widget.onLogout), dest: const NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Painel'), fab: true),
+      if (m.seesProducts && storeId != null)
+        (page: ProductsPage(api: widget.api, me: m, storeId: storeId!), dest: const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Produtos'), fab: false),
+      if (m.managesTeam)
+        (page: TeamPage(api: widget.api), dest: const NavigationDestination(icon: Icon(Icons.group_outlined), label: 'Equipe'), fab: true),
+      if (m.seesDashboard)
+        (page: Scaffold(appBar: AppBar(title: const Text('Avisos')), body: NotificationsPage(api: widget.api, canPay: m.paysInvoices)),
+          dest: const NavigationDestination(icon: Icon(Icons.notifications_outlined), label: 'Avisos'), fab: true),
+      if (m.paysInvoices)
+        (page: InvoicesPage(api: widget.api), dest: const NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Faturas'), fab: true),
     ];
+    if (tabs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text(m.tenantName), actions: [IconButton(onPressed: widget.onLogout, icon: const Icon(Icons.logout))]),
+        body: const Center(child: Padding(padding: EdgeInsets.all(24),
+            child: Text('Seu usuário entrou, mas não tem nenhuma função liberada no app. Peça ao dono para liberar "Cadastrar e editar produtos".', textAlign: TextAlign.center))),
+      );
+    }
+    final i = index.clamp(0, tabs.length - 1);
     return Scaffold(
-      body: IndexedStack(index: index, children: pages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (i) => setState(() => index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Painel'),
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Estoque'),
-          NavigationDestination(icon: Icon(Icons.notifications_outlined), label: 'Avisos'),
-        ],
+      body: IndexedStack(index: i, children: [for (final t in tabs) t.page]),
+      // Na aba Produtos o botão "Cadastrar produto" ocupa o canto; o WhatsApp aparece nas demais.
+      floatingActionButton: widget.support == null || !tabs[i].fab ? null : WhatsappFab(contact: widget.support!, tenantCode: widget.tenantCode),
+      bottomNavigationBar: tabs.length < 2 ? null : NavigationBar(
+        selectedIndex: i,
+        onDestinationSelected: (v) => setState(() => index = v),
+        destinations: [for (final t in tabs) t.dest],
       ),
     );
   }
 }
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.api, required this.branding, required this.onLoggedIn});
+  const LoginPage({super.key, required this.api, required this.branding, required this.onLoggedIn, required this.onServerChanged, this.support});
   final ApiClient api;
   final Branding branding;
   final Future<void> Function() onLoggedIn;
+  final Future<void> Function(String url) onServerChanged;
+  final SupportContact? support;
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -141,33 +215,67 @@ class _LoginPageState extends State<LoginPage> {
   final tenant = TextEditingController();
   final email = TextEditingController();
   final password = TextEditingController();
+  final totp = TextEditingController();
+  final serverUrl = TextEditingController();
   String? error;
+  String? serverInfo;
   bool busy = false;
+  bool needTotp = false;
+  bool showServer = false;
 
   @override
   void initState() {
     super.initState();
     widget.api.store.readTenantCode().then((v) => tenant.text = v ?? '');
+    serverUrl.text = widget.api.baseUrl;
   }
 
   Future<void> _submit() async {
     setState(() { busy = true; error = null; });
     try {
-      await widget.api.login(tenant.text.trim(), email.text.trim(), password.text);
+      await widget.api.login(tenant.text.trim(), email.text.trim(), password.text, totpCode: needTotp ? totp.text.trim() : null);
       password.clear();
+      totp.clear();
       await widget.onLoggedIn();
     } on ApiException catch (e) {
-      setState(() => error = e.code == 'account_locked' ? 'Conta bloqueada temporariamente.' : 'Não foi possível entrar: ${e.message}');
+      setState(() {
+        if (e.code == 'totp_required' || e.code == 'invalid_totp') { needTotp = true; totp.clear(); }
+        error = switch (e.code) {
+          'account_locked' => 'Conta bloqueada temporariamente.',
+          'mobile_not_allowed' => 'Seu usuário não tem acesso ao app. Peça ao dono da loja para liberar em Equipe.',
+          'invalid_credentials' => 'Código da empresa, e-mail ou senha incorretos.',
+          'totp_required' => 'Digite o código de 6 dígitos do aplicativo autenticador.',
+          'invalid_totp' => 'Código do autenticador incorreto (ou já usado). Espere o próximo.',
+          'insecure_transport' => e.message,
+          _ => 'Não foi possível entrar: ${e.message}',
+        };
+      });
     } catch (_) {
-      setState(() => error = 'Sem conexão com o servidor.');
+      setState(() { error = 'Sem conexão com o servidor (${widget.api.baseUrl}). Confira o endereço em "Servidor".'; showServer = true; });
     } finally {
       if (mounted) setState(() => busy = false);
+    }
+  }
+
+  /// Salva o endereço do servidor e testa a conexão (GET /health).
+  Future<void> _saveServer() async {
+    setState(() => serverInfo = 'Testando...');
+    await widget.onServerChanged(serverUrl.text);
+    serverUrl.text = widget.api.baseUrl;
+    try {
+      await widget.api.getPublic('/health');
+      setState(() => serverInfo = 'Conectado a ${widget.api.baseUrl}');
+    } on ApiException catch (e) {
+      setState(() => serverInfo = e.message);
+    } catch (_) {
+      setState(() => serverInfo = 'Sem resposta de ${widget.api.baseUrl}. O computador e o celular estão no mesmo Wi-Fi? A API está aberta?');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButton: widget.support == null ? null : WhatsappFab(contact: widget.support!),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -180,9 +288,25 @@ class _LoginPageState extends State<LoginPage> {
                 TextField(controller: tenant, decoration: const InputDecoration(labelText: 'Código da empresa')),
                 TextField(controller: email, decoration: const InputDecoration(labelText: 'E-mail'), keyboardType: TextInputType.emailAddress),
                 TextField(controller: password, decoration: const InputDecoration(labelText: 'Senha'), obscureText: true),
+                if (needTotp)
+                  TextField(controller: totp, decoration: const InputDecoration(labelText: 'Código do autenticador (6 dígitos)'),
+                      keyboardType: TextInputType.number, maxLength: 6),
                 const SizedBox(height: 16),
                 FilledButton(onPressed: busy ? null : _submit, child: Text(busy ? 'Entrando...' : 'Entrar')),
                 if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: () => setState(() => showServer = !showServer),
+                  icon: const Icon(Icons.dns_outlined),
+                  label: Text('Servidor: ${widget.api.baseUrl}'),
+                ),
+                if (showServer) ...[
+                  TextField(controller: serverUrl, keyboardType: TextInputType.url,
+                      decoration: const InputDecoration(labelText: 'Endereço do servidor', helperText: 'Rede local: http://IP-DO-COMPUTADOR:5080')),
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: _saveServer, child: const Text('Salvar e testar conexão')),
+                  if (serverInfo != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(serverInfo!)),
+                ],
               ]),
             ),
           ),
@@ -190,87 +314,4 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
-}
-
-class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key, required this.api, required this.branding, required this.onLogout});
-  final ApiClient api;
-  final Branding branding;
-  final Future<void> Function() onLogout;
-  @override
-  State<DashboardPage> createState() => _DashboardPageState();
-}
-
-class _DashboardPageState extends State<DashboardPage> {
-  Map<String, dynamic>? data;
-  Map<String, dynamic>? me;
-  String? error;
-  DateTime? loadedAt;
-  final money = NumberFormat.simpleCurrency(locale: 'pt_BR');
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final m = await widget.api.get('/api/v1/me');
-      final d = await widget.api.get('/api/v1/mobile/dashboard');
-      setState(() { me = m; data = d; error = null; loadedAt = DateTime.now(); });
-    } on ApiException catch (e) {
-      setState(() => error = switch (e.code) {
-        'module_not_enabled' => 'O aplicativo do proprietário não está contratado para esta empresa.',
-        'permission_denied' => 'Seu usuário não tem acesso aos relatórios.',
-        _ => e.message,
-      });
-    } catch (_) {
-      setState(() => error = 'Sem conexão. Os dados abaixo podem estar desatualizados.');
-    }
-  }
-
-  String _ago(String? iso) {
-    if (iso == null) return 'nunca';
-    final d = DateTime.now().difference(DateTime.parse(iso).toLocal());
-    if (d.inMinutes < 1) return 'agora';
-    if (d.inHours < 1) return 'há ${d.inMinutes} min';
-    if (d.inDays < 1) return 'há ${d.inHours} h';
-    return 'há ${d.inDays} dias';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final d = data;
-    final stale = loadedAt != null && DateTime.now().difference(loadedAt!).inMinutes > 15;
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.branding.systemName), actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh), tooltip: 'Atualizar'),
-        IconButton(onPressed: widget.onLogout, icon: const Icon(Icons.logout), tooltip: 'Sair'),
-      ]),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          if (error != null) Card(child: ListTile(leading: const Icon(Icons.warning_amber), title: Text(error!))),
-          if (stale) const Card(child: ListTile(leading: Icon(Icons.schedule), title: Text('Dados com mais de 15 minutos. Puxe para atualizar.'))),
-          if (d != null) ...[
-            _tile('Vendas hoje', money.format((d['todayRevenueCents'] as num) / 100), '${d['todaySalesCount']} vendas'),
-            _tile('Vendas no mês', money.format((d['monthRevenueCents'] as num) / 100), null),
-            _tile('Caixas abertos', '${d['openCashSessions']}', null),
-            _tile('Produtos com estoque baixo', '${d['lowStockProducts']}', null),
-            _tile('Licença', '${d['license']}', 'Módulos: ${(me?['modules'] as List?)?.join(', ') ?? '-'}'),
-            _tile('Última sincronização dos caixas', _ago(d['lastSyncAt'] as String?), d['note'] as String?),
-          ],
-        ]),
-      ),
-    );
-  }
-
-  Widget _tile(String title, String value, String? subtitle) => Card(
-        child: ListTile(
-          title: Text(title),
-          subtitle: subtitle == null ? null : Text(subtitle),
-          trailing: Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Theme.of(context).colorScheme.primary)),
-        ),
-      );
 }

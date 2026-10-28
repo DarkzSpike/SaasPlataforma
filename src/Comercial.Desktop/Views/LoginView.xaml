@@ -8,6 +8,10 @@
             <ColumnDefinition Width="1*"/>
         </Grid.ColumnDefinitions>
 
+        <!-- Fundo da empresa (white label): imagem com uma camada da cor da marca por cima para o texto continuar legível -->
+        <Image Grid.ColumnSpan="2" Source="{DynamicResource LoginBackground}" Stretch="UniformToFill" Visibility="{DynamicResource HasLoginBackground}"/>
+        <Rectangle Grid.ColumnSpan="2" Fill="{DynamicResource LoginGradientBrush}" Opacity="0.55" Visibility="{DynamicResource HasLoginBackground}"/>
+
         <!-- Fundo claro com borda curva + ondas decorativas -->
         <Path Grid.Column="1" Margin="-170,0,0,0" Stretch="Fill" Fill="{DynamicResource LightBgBrush}"
               Data="M 0.38,0 C 0.05,0.28 0.42,0.55 0.12,0.78 C 0.02,0.86 0.04,0.95 0,1 L 1,1 L 1,0 Z"/>
@@ -25,21 +29,26 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <StackPanel Orientation="Horizontal">
-                <TextBlock Style="{StaticResource Glyph}" Text="&#xE7BF;" FontSize="84" Foreground="{DynamicResource PrimaryLightBrush}" Margin="0,0,22,0"/>
+                <TextBlock Style="{StaticResource Glyph}" Text="&#xE7BF;" FontSize="84" Foreground="{DynamicResource PrimaryLightBrush}" Margin="0,0,22,0"
+                           Visibility="{DynamicResource NoLogoOnDark}"/>
+                <Image Source="{DynamicResource LogoOnDark}" MaxHeight="110" MaxWidth="260" Stretch="Uniform" Margin="0,0,22,0" VerticalAlignment="Center"
+                       Visibility="{DynamicResource HasLogoOnDark}" RenderOptions.BitmapScalingMode="HighQuality"/>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock FontSize="56" FontWeight="Bold">
                         <Run Text="{DynamicResource BrandFirst}" Foreground="White"/><Run Text="{DynamicResource BrandLast}" Foreground="{DynamicResource PrimaryLightBrush}"/>
                     </TextBlock>
-                    <TextBlock Text="S I M P L E S   •   R Á P I D O   •   E F I C I E N T E" Foreground="#CCFFFFFF" FontSize="12.5" Margin="4,2,0,0"/>
+                    <TextBlock Text="{DynamicResource TaglineSpaced}" Foreground="#CCFFFFFF" FontSize="12.5" Margin="4,2,0,0"/>
                 </StackPanel>
             </StackPanel>
             <StackPanel Grid.Row="1" Margin="0,56,0,0">
                 <TextBlock Text="{DynamicResource WelcomeMessage}" Foreground="White" FontSize="30" FontWeight="Bold"/>
-                <TextBlock Text="Faça login para acessar o sistema e continuar." Foreground="#DDFFFFFF" FontSize="19" TextWrapping="Wrap" MaxWidth="330" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                <TextBlock Text="{DynamicResource LoginSubtitle}" Foreground="#DDFFFFFF" FontSize="19" TextWrapping="Wrap" MaxWidth="330" HorizontalAlignment="Left" Margin="0,8,0,0"/>
             </StackPanel>
 
-            <!-- Ilustração vetorial do PDV -->
-            <Viewbox Grid.Row="2" HorizontalAlignment="Left" VerticalAlignment="Center" MaxWidth="520" Margin="-10,20,0,20">
+            <!-- Ilustração da empresa (white label) ou o desenho padrão do PDV -->
+            <Image Grid.Row="2" Source="{DynamicResource LoginImage}" HorizontalAlignment="Left" VerticalAlignment="Center" MaxWidth="560" Margin="0,20,0,20"
+                   Stretch="Uniform" Visibility="{DynamicResource HasLoginImage}" RenderOptions.BitmapScalingMode="HighQuality"/>
+            <Viewbox Grid.Row="2" HorizontalAlignment="Left" VerticalAlignment="Center" MaxWidth="520" Margin="-10,20,0,20" Visibility="{DynamicResource NoLoginImage}">
                 <Canvas Width="520" Height="330">
                     <Rectangle Canvas.Left="0" Canvas.Top="290" Width="520" Height="26" RadiusX="6" RadiusY="6" Fill="#33000000"/>
                     <!-- impressora -->
@@ -82,15 +91,15 @@
             <UniformGrid Grid.Row="3" Rows="1" HorizontalAlignment="Left" MaxWidth="600">
                 <StackPanel Orientation="Horizontal" Margin="0,0,24,0">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xEA18;" FontSize="30" Foreground="{DynamicResource PrimaryLightBrush}" Margin="0,0,12,0"/>
-                    <TextBlock Text="Seus dados&#x0a;protegidos" Foreground="#E6FFFFFF" FontSize="14" VerticalAlignment="Center"/>
+                    <TextBlock Text="{DynamicResource Feature1}" Foreground="#E6FFFFFF" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="130"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,24,0">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xE945;" FontSize="30" Foreground="{DynamicResource PrimaryLightBrush}" Margin="0,0,12,0"/>
-                    <TextBlock Text="Mais agilidade&#x0a;no seu dia" Foreground="#E6FFFFFF" FontSize="14" VerticalAlignment="Center"/>
+                    <TextBlock Text="{DynamicResource Feature2}" Foreground="#E6FFFFFF" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="130"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xE9D2;" FontSize="30" Foreground="{DynamicResource PrimaryLightBrush}" Margin="0,0,12,0"/>
-                    <TextBlock Text="Gestão completa&#x0a;do seu PDV" Foreground="#E6FFFFFF" FontSize="14" VerticalAlignment="Center"/>
+                    <TextBlock Text="{DynamicResource Feature3}" Foreground="#E6FFFFFF" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="130"/>
                 </StackPanel>
             </UniformGrid>
         </Grid>
@@ -106,7 +115,9 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,34" Visibility="{Binding NotSignup, Converter={StaticResource Vis}}">
                     <Grid Width="92" Height="92">
                         <Ellipse Fill="{DynamicResource PrimarySoftBrush}"/>
-                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="38" HorizontalAlignment="Center" Foreground="{DynamicResource PrimaryBrush}"/>
+                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="38" HorizontalAlignment="Center" Foreground="{DynamicResource PrimaryBrush}"
+                                   Visibility="{DynamicResource NoBrandIcon}"/>
+                        <Image Source="{DynamicResource BrandIcon}" Width="60" Height="60" Stretch="Uniform" Visibility="{DynamicResource HasBrandIcon}" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Grid>
                     <StackPanel VerticalAlignment="Center" Margin="26,0,0,0">
                         <TextBlock Text="{DynamicResource SystemName}" FontSize="40" FontWeight="Bold" Foreground="{DynamicResource LightTextBrush}"/>
@@ -163,6 +174,22 @@
                         Foreground="{DynamicResource PrimaryBrush}" Background="Transparent" BorderThickness="0" FontSize="15" AutomationProperties.Name="Esqueci minha senha"/>
                 <Button Content="Ainda não tem conta? Criar conta grátis" HorizontalAlignment="Center" Margin="0,6,0,0" Cursor="Hand" Command="{Binding SignupCommand}"
                         Foreground="{DynamicResource PrimaryBrush}" Background="Transparent" BorderThickness="0" FontSize="15" FontWeight="SemiBold"/>
+                <Button Content="{Binding ServerText}" HorizontalAlignment="Center" Margin="0,10,0,0" Cursor="Hand" Command="{Binding ServerCommand}"
+                        Foreground="{DynamicResource LightMutedBrush}" Background="Transparent" BorderThickness="0" FontSize="12.5"
+                        Visibility="{Binding NotServerMode, Converter={StaticResource Vis}}"
+                        ToolTip="Trocar o endereço do servidor" AutomationProperties.Name="Endereço do servidor"/>
+                <!-- Trocar o servidor (rede local, demonstração pela internet ou VPS) -->
+                <StackPanel Visibility="{Binding ServerMode, Converter={StaticResource Vis}}" Margin="0,14,0,0">
+                    <TextBlock Text="Endereço do servidor" FontSize="15" Foreground="{DynamicResource LightTextBrush}" Margin="0,0,0,6"/>
+                    <TextBox Style="{StaticResource LightInput}" local:Ui.Icon="&#xE774;" Text="{Binding ServerInput, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Endereço do servidor"/>
+                    <TextBlock Text="Rede local: 192.168.0.10:5080 • Internet: https://endereco" FontSize="12" Foreground="{DynamicResource LightMutedBrush}" Margin="2,4,0,0"/>
+                    <TextBlock Text="{Binding ServerError}" Foreground="{DynamicResource DangerBrush}" FontSize="13" TextWrapping="Wrap" Margin="2,6,0,0"
+                               Visibility="{Binding ServerError, Converter={StaticResource Vis}}"/>
+                    <UniformGrid Columns="2" Margin="0,10,0,0">
+                        <Button Style="{StaticResource DarkButton}" Content="Cancelar" Margin="0,0,6,0" Command="{Binding CancelServerCommand}"/>
+                        <Button Style="{StaticResource PrimaryButton}" Content="Testar e salvar" Margin="6,0,0,0" Command="{Binding SaveServerCommand}"/>
+                    </UniformGrid>
+                </StackPanel>
                 </StackPanel>
 
                 <!-- Cadastro com teste grátis (código de confirmação por e-mail) -->

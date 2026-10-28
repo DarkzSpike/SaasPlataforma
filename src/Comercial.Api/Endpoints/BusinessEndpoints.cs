@@ -34,7 +34,8 @@ public static class BusinessEndpoints
         {
             var query = db.Suppliers.AsNoTracking();
             if (all != true) query = query.Where(s => s.IsActive);
-            if (!string.IsNullOrWhiteSpace(q)) query = query.Where(s => s.Name.Contains(q) || s.Document == q);
+            var term = InputRules.SearchTerm(q);
+            if (term is not null) query = query.Where(s => s.Name.Contains(term) || s.Document == term);
             return Results.Ok(await query.OrderBy(s => s.Name).Take(500).ToListAsync());
         }).RequireFeature(ModuleKeys.Suppliers, Permissions.SuppliersManage);
         sup.MapPost("/", async (SupplierInput r, AppDbContext db, AuditService audit, RequestActor a) =>
@@ -114,7 +115,7 @@ public static class BusinessEndpoints
             .RequireFeature(ModuleKeys.Products, Permissions.ProductsWrite);
         // Catálogo completo e enxuto para o PDV trabalhar offline (sem o limite de 200 da listagem).
         api.MapGet("/catalog/products", async (AppDbContext db) => Results.Ok(await db.Products.AsNoTracking().Where(p => p.IsActive && !p.HasVariants)
-                .Select(p => new { p.Id, p.Sku, p.Barcode, p.Name, p.PriceCents, p.Unit }).ToListAsync()))
+                .Select(p => new { p.Id, p.Sku, p.Barcode, p.Name, p.PriceCents, p.Unit, p.OpenPrice }).ToListAsync()))
             .RequireFeature(ModuleKeys.Products, Permissions.ProductsRead);
         // Todos os códigos adicionais (o PDV guarda no catálogo local para ler pelo leitor de código de barras offline).
         api.MapGet("/catalog/barcodes", async (AppDbContext db) => Results.Ok(await db.ProductBarcodes.AsNoTracking().Select(b => new { b.ProductId, b.Code }).ToListAsync()))
@@ -205,10 +206,11 @@ public static class BusinessEndpoints
         cus.MapGet("/", async (AppDbContext db, string? q) =>
         {
             var query = db.Customers.AsNoTracking().Where(c => c.IsActive);
-            if (!string.IsNullOrWhiteSpace(q))
+            var term = InputRules.SearchTerm(q);
+            if (term is not null)
             {
-                var digits = new string(q.Where(char.IsDigit).ToArray());
-                query = query.Where(c => c.Name.Contains(q) || (digits.Length >= 4 && (c.Document!.Contains(digits) || c.Phone!.Contains(digits))));
+                var digits = new string(term.Where(char.IsDigit).ToArray());
+                query = query.Where(c => c.Name.Contains(term) || (digits.Length >= 4 && (c.Document!.Contains(digits) || c.Phone!.Contains(digits))));
             }
             return Results.Ok(await query.OrderBy(c => c.Name).Take(100)
                 .Select(c => new { c.Id, c.Name, c.Document, c.Phone, c.Email, c.MarketingConsent }).ToListAsync());

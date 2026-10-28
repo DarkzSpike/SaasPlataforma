@@ -17,7 +17,7 @@ public sealed class BrandingService(AppDbContext db, AuditService audit, Request
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public const long MaxAssetBytes = 2 * 1024 * 1024;
     public const int MaxDimension = 4096;
-    public static readonly string[] AssetKinds = ["logo", "logo_dark", "icon", "splash"];
+    public static readonly string[] AssetKinds = ["logo", "logo_dark", "icon", "splash", "login_image", "login_background"];
 
     private string StorageRoot => config["Storage:Root"] ?? Path.Combine(AppContext.BaseDirectory, "..", "storage");
 
@@ -53,7 +53,7 @@ public sealed class BrandingService(AppDbContext db, AuditService audit, Request
     {
         var errors = BrandingRules.Validate(cfg);
         // Assets referenciados precisam pertencer ao MESMO tenant.
-        foreach (var id in new[] { cfg.LogoAssetId, cfg.LogoDarkAssetId, cfg.IconAssetId, cfg.SplashAssetId }.OfType<Guid>())
+        foreach (var id in new[] { cfg.LogoAssetId, cfg.LogoDarkAssetId, cfg.IconAssetId, cfg.SplashAssetId, cfg.LoginImageAssetId, cfg.LoginBackgroundAssetId }.OfType<Guid>())
             if (!await db.BrandingAssets.IgnoreQueryFilters().AnyAsync(a => a.Id == id && a.TenantId == tenantId))
                 errors.Add($"Asset {id} não pertence a esta empresa.");
         if (errors.Count > 0) throw new DomainException("invalid_branding", string.Join("; ", errors));
