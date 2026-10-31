@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Comercial.Api.Services;
 
 namespace Comercial.Tests;
@@ -99,6 +101,37 @@ public class MobileReleaseTests(ApiFactory f) : IClassFixture<ApiFactory>
         using var host2 = f.WithWebHostBuilder(b => { b.UseSetting("Downloads:Root", rel); b.UseContentRoot(Directory.GetCurrentDirectory()); });
         Assert.Equal(HttpStatusCode.OK, (await host2.CreateClient().GetAsync("/downloads/teste-app.apk")).StatusCode);
         Directory.Delete(relDir, true);
+        Directory.Delete(dir, true);
+    }
+
+    [Fact]
+    public async Task Apk_gerado_no_servidor_vira_a_versao_mais_nova_sem_publicar_no_painel()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "apk-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        using var host = f.WithWebHostBuilder(b => b.UseSetting("Downloads:Root", dir));
+        var http = host.CreateClient();
+        async Task<JsonElement?> Latest()
+        {
+            var res = await http.GetAsync("/api/v1/public/mobile/latest");
+            return res.StatusCode == HttpStatusCode.NoContent ? null : await res.Content.ReadFromJsonAsync<JsonElement>();
+        }
+        var before = await Latest();   // o outro teste pode ter publicado uma versão pelo painel
+
+        // Manifesto apontando para um APK que não existe (ou nome inválido): ignorado.
+        await File.WriteAllTextAsync(Path.Combine(dir, "mobile-latest.json"), """{"versionCode":900,"versionName":"9.0.0","file":"comercial-9.0.0.apk"}""");
+        Assert.Equal(before?.GetProperty("versionCode").GetInt32(), (await Latest())?.GetProperty("versionCode").GetInt32());
+        await File.WriteAllTextAsync(Path.Combine(dir, "mobile-latest.json"), """{"versionCode":900,"versionName":"9.0.0","file":"../segredo.apk"}""");
+        Assert.Equal(before?.GetProperty("versionCode").GetInt32(), (await Latest())?.GetProperty("versionCode").GetInt32());
+
+        await File.WriteAllBytesAsync(Path.Combine(dir, "comercial-9.0.0.apk"), [1, 2, 3]);
+        await File.WriteAllTextAsync(Path.Combine(dir, "mobile-latest.json"), """{"versionCode":900,"versionName":"9.0.0","file":"comercial-9.0.0.apk","notes":"Novidades"}""");
+        var r = (await Latest())!.Value;
+        Assert.Equal(900, r.GetProperty("versionCode").GetInt32());
+        Assert.Equal("9.0.0", r.GetProperty("versionName").GetString());
+        Assert.Equal("/downloads/comercial-9.0.0.apk", r.GetProperty("path").GetString());   // relativo: baixa do servidor em uso
+        Assert.EndsWith("/downloads/comercial-9.0.0.apk", r.GetProperty("url").GetString());   // completo: apps até a 1.0.7
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(r.GetProperty("path").GetString())).StatusCode);
         Directory.Delete(dir, true);
     }
 

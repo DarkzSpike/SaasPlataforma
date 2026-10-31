@@ -306,6 +306,71 @@ public sealed class CustomersViewModel : OwnerPage
             return false;
         });
     }, _ => Selected is not null && S.Session.Can("cash.operate", "contas"));
+    // ---------- Cobrança do fiado pelo WhatsApp da loja ----------
+    private string _billing = "";
+    private int? _billingDay;
+    /// <summary>Quadro "melhor dia para cobrar": aparece para quem vê o financeiro (módulo Contas).</summary>
+    public bool CanBilling => S.Session.Can("finance.read", "contas");
+    public string BillingText { get => _billing; set => Set(ref _billing, value); }
+
+    public RelayCommand BillingDayCommand => RelayCommand.Sync(_ => Shell.ShowPrompt(new PromptViewModel
+    {
+        Title = "Dia de cobrança: " + Selected!.Name,
+        Message = "Todo mês, nesse dia, o WhatsApp da loja manda para o cliente quanto ele deve e o que comprou em cada dia. Deixe vazio para não cobrar automaticamente.",
+        ValueLabel = "Dia do mês (1 a 31)", Value = _billingDay?.ToString() ?? "", ConfirmText = "Salvar dia",
+    }, async p =>
+    {
+        int? day = null;
+        if (p.Value.Trim().Length > 0)
+        {
+            if (!int.TryParse(p.Value.Trim(), out var d) || d is < 1 or > 31) { p.Error = "Use um dia de 1 a 31 (ou deixe vazio)."; return false; }
+            day = d;
+        }
+        try { await S.Api.PutAsync($"/api/v1/customers/{Selected!.Id}/billing-day", new { day }); await LoadDetailAsync(Selected!); return true; }
+        catch (ApiException ex) { p.Error = ex.Status == 403 ? "Só o dono/financeiro define o dia de cobrança." : "Falha: " + ex.Code; }
+        catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
+        return false;
+    }), _ => Selected is not null && S.Session.Can("finance.manage", "contas"));
+
+    /// <summary>Botão verde: mostra a mensagem com o saldo e as compras por dia e envia pelo WhatsApp da loja.</summary>
+    public RelayCommand ChargeWhatsAppCommand => new(async _ =>
+    {
+        var c = Selected!;
+        try
+        {
+            var pv = await S.Api.GetAsync($"/api/v1/customers/{c.Id}/charge-preview");
+            if (!pv.GetProperty("canSend").GetBoolean())
+            {
+                Shell.ShowPrompt(new PromptViewModel { Title = "Cobrar pelo WhatsApp", Message = pv.GetProperty("reason").GetString()!, ConfirmText = "Entendi" }, _ => Task.FromResult(true));
+                return;
+            }
+            Shell.ShowPrompt(new PromptViewModel
+            {
+                Title = "Cobrar pelo WhatsApp: " + c.Name,
+                Message = pv.GetProperty("text").GetString() + $"\n\nEnviar agora para o celular {pv.GetProperty("phone").GetString()}?",
+                ConfirmText = "Enviar cobrança",
+            }, async p =>
+            {
+                try { await S.Api.PostAsync($"/api/v1/customers/{c.Id}/charge", new { }); await LoadDetailAsync(c); return true; }
+                catch (ApiException ex) { p.Error = ex.Code is "charge_too_soon" or "whatsapp_send_failed" or "nothing_to_charge" or "invalid_phone" or "whatsapp_not_connected" ? ex.Message : "Falha: " + ex.Code; }
+                catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
+                return false;
+            });
+        }
+        catch (ApiException ex) { DetailInfo = "Não foi possível preparar a cobrança: " + ex.Code; }
+        catch (HttpRequestException) { DetailInfo = "Sem conexão com o servidor."; }
+    }, _ => Selected is not null && S.Session.Can("finance.manage", "contas"));
+
+    /// <summary>Usado só pelas capturas de tela.</summary>
+    public void SetBillingForPreview(int? day, string? last)
+    {
+        _billingDay = day;
+        BillingText = BillingLabel(day, last);
+    }
+
+    private static string BillingLabel(int? day, string? last) =>
+        (day is null ? "Cobrança automática desligada" : $"Cobrança automática: todo dia {day}") + (last is null ? "" : $"\nÚltima: {last}");
+
     public bool HasSelection => Selected is not null;
     public CustomerRow? Selected { get => _selected; set { if (Set(ref _selected, value)) { Raise(nameof(HasSelection)); if (value is not null) _ = LoadDetailAsync(value); } } }
     public RelayCommand SearchCommand { get; }
@@ -340,6 +405,11 @@ public sealed class CustomersViewModel : OwnerPage
             Statement.Clear();
             PointsText = "";
             CreditText = "";
+            var cust = d.GetProperty("customer");
+            _billingDay = cust.TryGetProperty("billingDay", out var bd) && bd.ValueKind == JsonValueKind.Number ? bd.GetInt32() : null;
+            var lastCharge = cust.TryGetProperty("lastChargeSentOn", out var lc) && lc.ValueKind == JsonValueKind.String
+                ? DateOnly.Parse(lc.GetString()!, System.Globalization.CultureInfo.InvariantCulture).ToString("dd/MM/yyyy") : null;
+            BillingText = BillingLabel(_billingDay, lastCharge);
             if (S.Session.Can("customers.read", "contas"))
             {
                 try

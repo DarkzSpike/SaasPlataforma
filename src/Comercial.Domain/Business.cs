@@ -71,6 +71,12 @@ public class Customer : TenantEntity
     public bool MarketingConsent { get; set; }
     /// <summary>Limite para vender no fiado (crediário). 0 = não pode comprar fiado.</summary>
     public long CreditLimitCents { get; set; }
+    /// <summary>Dia do mês (1 a 31) em que o cliente prefere ser cobrado do fiado pelo WhatsApp. Nulo = não cobrar.</summary>
+    public int? BillingDay { get; set; }
+    /// <summary>Última cobrança automática enviada (evita cobrar duas vezes no mesmo mês).</summary>
+    public DateOnly? LastChargeSentOn { get; set; }
+    /// <summary>Última promoção recebida (respeita o intervalo mínimo entre promoções).</summary>
+    public DateTimeOffset? LastPromoSentAt { get; set; }
     public DateTimeOffset? ConsentAt { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

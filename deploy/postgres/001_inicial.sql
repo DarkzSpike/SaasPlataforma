@@ -2972,3 +2972,126 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    ALTER TABLE customers ADD "BillingDay" integer;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    ALTER TABLE customers ADD "LastChargeSentOn" date;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    ALTER TABLE customers ADD "LastPromoSentAt" timestamp with time zone;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    CREATE TABLE tenant_whatsapp_settings (
+        "TenantId" uuid NOT NULL,
+        "PhoneNumberId" character varying(40),
+        "AccessTokenProtected" text,
+        "DisplayPhone" character varying(40),
+        "VerifiedName" character varying(200),
+        "AppSecretProtected" text,
+        "WebhookVerifyToken" character varying(64) NOT NULL,
+        "ChargeTemplate" character varying(100) NOT NULL,
+        "PromoTemplate" character varying(100) NOT NULL,
+        "Language" character varying(10) NOT NULL,
+        "ChargesEnabled" boolean NOT NULL,
+        "PromotionsEnabled" boolean NOT NULL,
+        "DailyPromoLimit" integer NOT NULL,
+        "PromoIntervalDays" integer NOT NULL,
+        "UpdatedAt" timestamp with time zone NOT NULL,
+        "UpdatedByUserId" uuid,
+        CONSTRAINT "PK_tenant_whatsapp_settings" PRIMARY KEY ("TenantId"),
+        CONSTRAINT "FK_tenant_whatsapp_settings_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    CREATE TABLE whatsapp_campaigns (
+        "Id" uuid NOT NULL,
+        "Title" character varying(100) NOT NULL,
+        "Message" character varying(600) NOT NULL,
+        "ScheduledAt" timestamp with time zone NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "Sent" integer NOT NULL,
+        "Failed" integer NOT NULL,
+        "StopReason" character varying(300),
+        "CreatedByUserId" uuid NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "FinishedAt" timestamp with time zone,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_whatsapp_campaigns" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_whatsapp_campaigns_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    CREATE TABLE whatsapp_messages (
+        "Id" uuid NOT NULL,
+        "CustomerId" uuid,
+        "CampaignId" uuid,
+        "Kind" character varying(20) NOT NULL,
+        "Phone" character varying(20) NOT NULL,
+        "Status" character varying(20) NOT NULL,
+        "ProviderMessageId" character varying(200),
+        "Error" character varying(500),
+        "Preview" character varying(2000) NOT NULL,
+        "AmountCents" bigint NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        "TenantId" uuid NOT NULL,
+        CONSTRAINT "PK_whatsapp_messages" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_whatsapp_messages_tenants_TenantId" FOREIGN KEY ("TenantId") REFERENCES tenants ("Id") ON DELETE RESTRICT
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    CREATE INDEX "IX_whatsapp_campaigns_TenantId_Status_ScheduledAt" ON whatsapp_campaigns ("TenantId", "Status", "ScheduledAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    CREATE INDEX "IX_whatsapp_messages_TenantId_CampaignId_CustomerId" ON whatsapp_messages ("TenantId", "CampaignId", "CustomerId");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    CREATE INDEX "IX_whatsapp_messages_TenantId_Kind_CreatedAt" ON whatsapp_messages ("TenantId", "Kind", "CreatedAt");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031143409_WhatsAppCobrancaCampanhas') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261031143409_WhatsAppCobrancaCampanhas', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+

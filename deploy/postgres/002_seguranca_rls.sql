@@ -46,7 +46,8 @@ BEGIN
     'operating_events','fiscal_documents','fiscal_events','sync_events','support_sessions','support_elevation_requests',
     'notifications','push_tokens','suppliers','purchase_orders','purchase_items','purchase_receipts',
     'customers','loyalty_programs','loyalty_transactions','financial_titles','sale_returns','sale_return_items','tenant_storage_settings','discount_authorizations','password_reset_tokens','tenant_payment_settings','pos_pix_charges','tenant_fiscal_profiles','fiscal_number_voids','product_barcodes','product_components','promotions','quotes','quote_items','product_batches','stock_transfers','stock_transfer_items','imported_invoices',
-    'fiscal_xml_files','fiscal_exports','fiscal_month_closings','accountant_settings','accountant_deliveries']
+    'fiscal_xml_files','fiscal_exports','fiscal_month_closings','accountant_settings','accountant_deliveries',
+    'tenant_whatsapp_settings','whatsapp_messages','whatsapp_campaigns']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);

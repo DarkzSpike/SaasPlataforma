@@ -32,6 +32,8 @@ class Me {
   bool get seesStock => can('stock.read');
   bool get entersStock => can('stock.entry');
   bool get managesTeam => can('users.manage');
+  /// Financeiro: resumo, contas e lançamento de gastos (módulo financeiro contratado + permissão).
+  bool get seesFinance => modules.contains('financeiro') && can('finance.read');
   bool get seesProfit => can('reports.financial');
   /// Ver e pagar as faturas do sistema (mensalidade).
   bool get paysInvoices => can('billing.manage');

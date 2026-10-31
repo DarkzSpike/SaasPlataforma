@@ -67,6 +67,20 @@ public static class Snapshot
         shell.Pos.AddLine(Guid.NewGuid(), "Caixa organizadora 20 L", 1, 4590);
         shell.Pos.Paid = "150,00";
         Save(window, Path.Combine(dir, "04-pdv-venda.png"));
+
+        // Pagamento em partes: R$ 50 no dinheiro, o resto no cartão (com "Voltar" se o cartão for recusado).
+        shell.Pos.Method = shell.Pos.PaymentOptions[0];
+        shell.Pos.Paid = "50,00";
+        shell.Pos.FinishCommand.Execute(null);
+        Save(window, Path.Combine(dir, "04c-pdv-falta-pagar.png"));
+        shell.Pos.Method = shell.Pos.PaymentOptions[2];
+        shell.Pos.FinishCommand.Execute(null);
+        Save(window, Path.Combine(dir, "04d-pdv-confirmar-cartao.png"));
+        shell.Prompt?.CancelCommand?.Execute(null);
+        shell.Pos.PaymentLines.Clear();
+        shell.Pos.Status = "";
+        shell.Pos.Paid = "150,00";
+        shell.Pos.Method = shell.Pos.PaymentOptions[0];
         // Loja que emite NFC-e só a pedido + item de preço livre ("100=9,90" → Diversos).
         services.Db.Set("fiscal.mode", "a_pedido");
         shell.Pos.RefreshFiscalMode();
@@ -163,7 +177,7 @@ public static class Snapshot
         var form = new FormViewModel { Title = "Novo produto", Message = "Cadastre o produto e, se quiser, a quantidade que já está na loja.", ConfirmText = "Cadastrar produto", AllowImage = true };
         form.Fields.Add(new FormField("name", "Nome do produto", "Garrafa térmica 500 ml", Icons.Box));
         form.Fields.Add(new FormField("sku", "Código interno (SKU)", "GAR007", Icons.Edit));
-        form.Fields.Add(new FormField("barcode", "Código de barras", "7891000100073", Icons.Chart));
+        form.Fields.Add(new FormField("barcode", "Código de barras", "2000001234565", Icons.Chart) { ActionText = "Gerar código", ActionCommand = RelayCommand.Sync(_ => { }), Note = "Código gerado pelo sistema (único). Imprima a etiqueta no botão Etiquetas do Estoque." });
         form.Fields.Add(new FormField("cost", "Quanto você pagou pelo produto (custo R$)", "20,00", Icons.Money));
         form.Fields.Add(new FormField("markup", "% de lucro em cima do custo", "100", Icons.Chart));
         form.Fields.Add(new FormField("price", "Preço de venda (R$)", "40,00", Icons.Money) { IsReadOnly = true, Note = "Calculado automaticamente • lucro de R$ 20,00 por unidade" });
@@ -227,6 +241,28 @@ public static class Snapshot
         cus.Statement.Add(new StatementRow("11/10 10:05", "Compra", "+139", "compra", true));
         shell.ShowForPreview("customers", cus);
         Save(window, Path.Combine(dir, "14-clientes.png"));
+
+        // Cobrança do fiado pelo WhatsApp da loja: dia escolhido e botão verde.
+        cus.CreditText = "Fiado: deve R$ 49,80 • limite R$ 300,00 • disponível R$ 250,20";
+        cus.SetBillingForPreview(10, "10/10/2026");
+        Save(window, Path.Combine(dir, "14b-clientes-whatsapp.png"));
+        shell.ShowPrompt(new PromptViewModel
+        {
+            Title = "Cobrar pelo WhatsApp: Maria Silva",
+            Message = "Olá, Maria! Aqui é da Loja Demo. Seu saldo no crediário é de R$ 49,80. Compras em aberto: 28/10: Caneca de cerâmica 300 ml x2 (R$ 49,80). Para pagar ou tirar dúvidas, responda esta mensagem.\n\nEnviar agora para o celular •••7777?",
+            ConfirmText = "Enviar cobrança",
+        }, _ => Task.FromResult(true));
+        Save(window, Path.Combine(dir, "14c-cobranca-whatsapp.png"));
+        shell.Prompt = null;
+
+        var settingsPage = new SettingsViewModel(shell);
+        settingsPage.SetForPreview();
+        shell.Page = settingsPage;
+        Save(window, Path.Combine(dir, "32-configuracoes.png"));
+        var campaignsPage = new CampaignsViewModel(shell);
+        campaignsPage.SetForPreview();
+        shell.Page = campaignsPage;
+        Save(window, Path.Combine(dir, "33-campanhas.png"));
 
         var fin = new FinanceViewModel(shell);
         fin.Kpis.Add(new Kpi("A pagar no mês", "R$ 4.320,00", "em aberto", Icons.Calendar, "warn"));
@@ -444,3 +480,4 @@ public static class Snapshot
         enc.Save(fs);
     }
 }
+

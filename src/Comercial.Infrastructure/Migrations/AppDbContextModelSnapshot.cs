@@ -448,6 +448,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("AnonymizedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("BillingDay")
+                        .HasColumnType("integer");
+
                     b.Property<DateOnly?>("BirthDate")
                         .HasColumnType("date");
 
@@ -468,6 +471,12 @@ namespace Comercial.Infrastructure.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<DateOnly?>("LastChargeSentOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset?>("LastPromoSentAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("MarketingConsent")
                         .HasColumnType("boolean");
@@ -3354,6 +3363,72 @@ namespace Comercial.Infrastructure.Migrations
                     b.ToTable("tenant_storage_settings", (string)null);
                 });
 
+            modelBuilder.Entity("Comercial.Domain.TenantWhatsAppSettings", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccessTokenProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AppSecretProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ChargeTemplate")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("ChargesEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("DailyPromoLimit")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DisplayPhone")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("PhoneNumberId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("PromoIntervalDays")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PromoTemplate")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("PromotionsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VerifiedName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("WebhookVerifyToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("tenant_whatsapp_settings", (string)null);
+                });
+
             modelBuilder.Entity("Comercial.Domain.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3513,6 +3588,117 @@ namespace Comercial.Infrastructure.Migrations
                     b.HasIndex("TenantId", "UserId");
 
                     b.ToTable("user_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.WhatsAppCampaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Failed")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(600)
+                        .HasColumnType("character varying(600)");
+
+                    b.Property<DateTimeOffset>("ScheduledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Sent")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("StopReason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Status", "ScheduledAt");
+
+                    b.ToTable("whatsapp_campaigns", (string)null);
+                });
+
+            modelBuilder.Entity("Comercial.Domain.WhatsAppMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Preview")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CampaignId", "CustomerId");
+
+                    b.HasIndex("TenantId", "Kind", "CreatedAt");
+
+                    b.ToTable("whatsapp_messages", (string)null);
                 });
 
             modelBuilder.Entity("Comercial.Domain.AccountantDelivery", b =>
@@ -4225,6 +4411,15 @@ namespace Comercial.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Comercial.Domain.TenantWhatsAppSettings", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Comercial.Domain.User", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
@@ -4260,6 +4455,24 @@ namespace Comercial.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("Comercial.Domain.UserSession", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.WhatsAppCampaign", b =>
+                {
+                    b.HasOne("Comercial.Domain.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Comercial.Domain.WhatsAppMessage", b =>
                 {
                     b.HasOne("Comercial.Domain.Tenant", null)
                         .WithMany()

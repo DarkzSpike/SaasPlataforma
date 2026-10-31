@@ -32,6 +32,8 @@
             <DataTemplate DataType="{x:Type local:PromotionsViewModel}"><views:PromotionsView/></DataTemplate>
             <DataTemplate DataType="{x:Type local:QuotesViewModel}"><views:QuotesView/></DataTemplate>
             <DataTemplate DataType="{x:Type local:ReportsViewModel}"><views:ReportsView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:SettingsViewModel}"><views:SettingsView/></DataTemplate>
+            <DataTemplate DataType="{x:Type local:CampaignsViewModel}"><views:CampaignsView/></DataTemplate>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -401,7 +401,7 @@ public sealed class ShellViewModel : ObservableObject
     public PosViewModel Pos { get; }
     public ObservableCollection<NavItem> Nav { get; } = [];
     public string UserLabel { get; }
-    public NavItem SelectedNav { get => _selected; set { if (Set(ref _selected, value)) Navigate(value); } }
+    public NavItem SelectedNav { get => _selected; set { if (Set(ref _selected, value) && value is not null) Navigate(value); } }
     public object Page { get => _page; set => Set(ref _page, value); }
     public PromptViewModel? Prompt { get => _prompt; set => Set(ref _prompt, value); }
     private SaleDoneViewModel? _saleDone;
@@ -443,6 +443,7 @@ public sealed class ShellViewModel : ObservableObject
         UserLabel = userLabel;
         Pos = new PosViewModel(this, startTimers);
         var sess = S.Session;
+        var Nav = AvailableNav; // monta a lista completa; o menu visível sai dela (ordem e ícones escondidos na engrenagem)
         Nav.Add(new NavItem("pos", "Vendas", "\uE7BF"));
         if (sess.Can("reports.read", "app_proprietario")) Nav.Add(new NavItem("dashboard", "Painel", "\uE9D2"));
         if (sess.Can("sales.read")) Nav.Add(new NavItem("history", "Histórico", "\uE81C"));
@@ -458,6 +459,7 @@ public sealed class ShellViewModel : ObservableObject
         if (sess.Can("reports.read", "relatorios_premium")) Nav.Add(new NavItem("reports", "Relatórios", "\uE9F9"));
         if (sess.Can("sales.create", "pdv")) Nav.Add(new NavItem("quotes", "Orçamentos", "\uE8A5"));
         if (sess.Can("products.write", "pdv")) Nav.Add(new NavItem("promotions", "Promoções", "\uE8EC"));
+        if (sess.Can("messaging.manage", "campanhas")) Nav.Add(new NavItem("campaigns", "Campanhas", "\uE789"));
         if (sess.Can("fiscal.read", "fiscal")) Nav.Add(new NavItem("fiscal", "Fiscal", "\uE7C3"));
         if (sess.Can("cash.operate")) Nav.Add(new NavItem("devices", "Dispositivos", "\uE749"));
         if (sess.Can("payments.configure", "pdv")) Nav.Add(new NavItem("receipts", "Recebimentos", "\uE8C7"));
@@ -465,11 +467,35 @@ public sealed class ShellViewModel : ObservableObject
         if (sess.Can("support.approve")) Nav.Add(new NavItem("support", "Suporte", "\uE897"));
         Nav.Add(new NavItem("account", "Minha conta", "\uE77B"));
         Nav.Add(new NavItem("help", "Ajuda", "\uE897"));
-        _selected = Nav[0];
+        ApplyNavPrefs();
+        _selected = this.Nav[0];
         _page = Pos;
-        LogoutCommand = RelayCommand.Sync(_ => { Pos.Stop(); _main.Current = new LoginViewModel(_main); });
+        LogoutCommand = RelayCommand.Sync(_ => { Pos.Stop(); StopUpdateChecks(); _main.Current = new LoginViewModel(_main); });
         RefreshStatus();
     }
+
+    /// <summary>Todas as áreas que este usuário pode abrir (o menu mostra só as não escondidas, na ordem escolhida).</summary>
+    public List<NavItem> AvailableNav { get; } = [];
+
+    /// <summary>Aplica a ordem e os ícones escondidos salvos neste computador. "Vendas" nunca some.</summary>
+    public void ApplyNavPrefs()
+    {
+        var order = S.Settings.NavOrder;
+        var hidden = S.Settings.NavHidden.Where(k => k != "pos").ToHashSet();
+        var sorted = AvailableNav.OrderBy(n => order.IndexOf(n.Key) is var i && i >= 0 ? i : order.Count + AvailableNav.IndexOf(n)).ToList();
+        var current = _selected?.Key;
+        Nav.Clear();
+        foreach (var n in sorted.Where(n => !hidden.Contains(n.Key))) Nav.Add(n);
+        if (current is not null && Nav.FirstOrDefault(n => n.Key == current) is { } keep) { _selected = keep; Raise(nameof(SelectedNav)); }
+    }
+
+    /// <summary>Engrenagem do cabeçalho: menu lateral deste computador e WhatsApp da loja.</summary>
+    public RelayCommand OpenSettingsCommand => RelayCommand.Sync(_ =>
+    {
+        _selected = null!;
+        Raise(nameof(SelectedNav));
+        Page = Load(new SettingsViewModel(this));
+    });
 
     private void Navigate(NavItem item)
     {
@@ -492,6 +518,7 @@ public sealed class ShellViewModel : ObservableObject
             "quotes" => Load(new QuotesViewModel(this)),
             "reports" => Load(new ReportsViewModel(this)),
             "promotions" => Load(new PromotionsViewModel(this)),
+            "campaigns" => Load(new CampaignsViewModel(this)),
             "devices" => Load(new DevicesViewModel(this)),
             "support" => Load(new SupportViewModel(this)),
             "account" => Load(new AccountViewModel(this)),
@@ -510,9 +537,9 @@ public sealed class ShellViewModel : ObservableObject
         Page = page;
     }
 
-    public void ShowPrompt(PromptViewModel p, Func<PromptViewModel, Task<bool>> onConfirm)
+    public void ShowPrompt(PromptViewModel p, Func<PromptViewModel, Task<bool>> onConfirm, Action? onCancel = null)
     {
-        p.CancelCommand = RelayCommand.Sync(_ => Prompt = null);
+        p.CancelCommand = RelayCommand.Sync(_ => { Prompt = null; onCancel?.Invoke(); });
         p.ConfirmCommand = new RelayCommand(async _ => { if (await onConfirm(p)) Prompt = null; });
         Prompt = p;
     }
@@ -533,20 +560,50 @@ public sealed class ShellViewModel : ObservableObject
         UpdateText = text; Raise(nameof(HasUpdate));
     }
 
+    private DispatcherTimer? _updateTimer;
+    private string? _askedVersion;
+
+    /// <summary>
+    /// Confere se há versão nova no login e a cada 30 minutos. A faixa no topo fica visível e, uma vez por versão,
+    /// o caixa pergunta "Atualizar agora?" (só com o carrinho vazio, para não atrapalhar uma venda).
+    /// </summary>
     public async Task CheckUpdateAsync(string licensePem)
     {
+        if (_updateTimer is null)
+        {
+            _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
+            _updateTimer.Tick += async (_, _) => await CheckUpdateAsync(licensePem);
+            _updateTimer.Start();
+        }
         try
         {
             using var http = new HttpClient { BaseAddress = new Uri(S.Settings.ApiBaseUrl), Timeout = TimeSpan.FromSeconds(15) };
-            _update = await Updater.CheckAsync(http, CurrentVersion, licensePem);
-            if (_update is null) return;
+            var found = await Updater.CheckAsync(http, CurrentVersion, licensePem);
+            if (found is null || _updating) return;
+            _update = found;
             UpdateText = $"Nova versão {_update.Version} disponível" + (_update.Mandatory ? " (obrigatória)" : "") + (string.IsNullOrWhiteSpace(_update.Notes) ? "." : ": " + _update.Notes);
             Raise(nameof(HasUpdate));
+            if (_askedVersion != found.Version && Prompt is null && Form is null && Pos.Cart.Count == 0)
+            {
+                _askedVersion = found.Version;
+                ShowPrompt(new PromptViewModel
+                {
+                    Title = $"Nova versão {found.Version} disponível",
+                    Message = (string.IsNullOrWhiteSpace(found.Notes) ? "" : found.Notes.Trim() + "\n\n")
+                        + "Atualizar agora? O caixa baixa a versão nova, fecha e abre de novo sozinho (leva cerca de um minuto). "
+                        + "Se preferir, atualize depois pelo botão na faixa do topo.",
+                    ConfirmText = "Atualizar agora",
+                }, async _ => { await RunUpdateAsync(); return true; });
+            }
         }
-        catch (Exception) { /* sem internet ou servidor antigo: tenta no próximo login */ }
+        catch (Exception) { /* sem internet ou servidor antigo: tenta de novo daqui a 30 minutos */ }
     }
 
-    public RelayCommand UpdateCommand => new(async _ =>
+    public void StopUpdateChecks() => _updateTimer?.Stop();
+
+    public RelayCommand UpdateCommand => new(async _ => await RunUpdateAsync());
+
+    private async Task RunUpdateAsync()
     {
         if (_update is null || _updating) return;
         if (S.Db.Pending(1).Count > 0 && !_update.Mandatory) { UpdateText = "Há vendas aguardando sincronização. Aguarde enviar (ícone de nuvem) e clique de novo."; return; }
@@ -563,7 +620,7 @@ public sealed class ShellViewModel : ObservableObject
         }
         catch (Exception ex) { UpdateText = "Não foi possível atualizar: " + ex.Message; }
         finally { _updating = false; }
-    });
+    }
 
     public void MarkOnline(bool online)
     {
@@ -630,10 +687,20 @@ public sealed class PosViewModel : ObservableObject
     // Várias formas de pagamento na mesma venda (ex.: parte no PIX, resto em dinheiro).
     public ObservableCollection<PaymentLine> PaymentLines { get; } = [];
     public bool HasPaymentLines => PaymentLines.Count > 0;
-    public string RemainingText => HasPaymentLines ? $"Falta receber: {AppServices.Money(PaymentSplit.Remaining(TotalCents, PaymentLines.Select(p => (p.Method, p.Cents))))}" : "";
+    private long PaidLinesCents => PaymentLines.Sum(p => p.Cents);
+    private long RemainingCents => PaymentSplit.Remaining(TotalCents, PaymentLines.Select(p => (p.Method, p.Cents)));
+    public string RemainingText => HasPaymentLines ? $"Falta receber: {AppServices.Money(RemainingCents)}" : "";
+    /// <summary>Destaque "Falta pagar" logo abaixo do total quando o cliente paga em partes.</summary>
+    public bool HasRemaining => HasPaymentLines && RemainingCents > 0;
+    public bool PaymentComplete => HasPaymentLines && RemainingCents == 0;
+    public string RemainingAmountText => AppServices.Money(RemainingCents);
+    public string PaidSoFarText => $"Já recebido: {AppServices.Money(PaidLinesCents)}";
     public RelayCommand AddPaymentCommand => RelayCommand.Sync(_ => AddPayment(), _ => Cart.Count > 0);
     public RelayCommand RemovePaymentCommand => RelayCommand.Sync(p => { if (p is PaymentLine l) { PaymentLines.Remove(l); RaisePayments(); } });
-    private void RaisePayments() { Raise(nameof(HasPaymentLines)); Raise(nameof(RemainingText)); }
+    private void RaisePayments()
+    {
+        foreach (var n in new[] { nameof(HasPaymentLines), nameof(RemainingText), nameof(HasRemaining), nameof(PaymentComplete), nameof(RemainingAmountText), nameof(PaidSoFarText) }) Raise(n);
+    }
 
     private void AddPayment()
     {
@@ -642,9 +709,16 @@ public sealed class PosViewModel : ObservableObject
         if (cents == 0) cents = remaining;
         if (cents <= 0) { Status = "O total já foi coberto."; return; }
         if (Method.Method != PaymentSplit.Cash && cents > remaining) { Status = $"{Method.Name} não gera troco: no máximo {AppServices.Money(remaining)}."; return; }
-        PaymentLines.Add(new PaymentLine(Method.Method, Method.Name, cents));
-        Paid = ""; Status = "";
-        RaisePayments();
+        var method = Method;
+        void Add()
+        {
+            PaymentLines.Add(new PaymentLine(method.Method, method.Name, cents));
+            Paid = ""; Status = "";
+            RaisePayments();
+        }
+        if (method.Method != 5) { Add(); return; }
+        if (_customer is null) { Status = "Fiado: identifique o cliente antes de lançar."; return; }
+        _ = CheckCreditThenAsync(PaymentLines.Where(l => l.Method == 5).Sum(l => l.Cents) + cents, Add);
     }
     public PaymentOption Method { get => _method; set => Set(ref _method, value); }
     public string Status { get => _status; set => Set(ref _status, value); }
@@ -808,7 +882,7 @@ public sealed class PosViewModel : ObservableObject
     public RelayCommand SearchCustomerCommand { get; private set; } = null!;
     public RelayCommand ClearCustomerCommand { get; private set; } = null!;
 
-    private void RaiseTotals() { Raise(nameof(TotalText)); Raise(nameof(LoyaltyText)); Raise(nameof(HasSaleDiscount)); Raise(nameof(SaleDiscountText)); Raise(nameof(RemainingText)); }
+    private void RaiseTotals() { Raise(nameof(TotalText)); Raise(nameof(LoyaltyText)); Raise(nameof(HasSaleDiscount)); Raise(nameof(SaleDiscountText)); RaisePayments(); }
 
     private void RaiseCustomer()
     {
@@ -890,7 +964,17 @@ public sealed class PosViewModel : ObservableObject
         ClearCustomerCommand = RelayCommand.Sync(_ => ClearCustomer());
         AddCommand = RelayCommand.Sync(_ => Add());
         ClearCommand = RelayCommand.Sync(_ => { Cart.Clear(); ClearDiscount(); PaymentLines.Clear(); RaisePayments(); Coupon = ""; _quoteId = null; }, _ => Cart.Count > 0);
-        RemoveCommand = RelayCommand.Sync(p => { if (p is CartItemVm i) Cart.Remove(i); });
+        RemoveCommand = RelayCommand.Sync(p =>
+        {
+            if (p is not CartItemVm i) return;
+            Cart.Remove(i);
+            if (!HasPaymentLines) return;
+            // Tirou item depois de lançar parte do pagamento: confere se o que já foi lançado ainda cabe no total.
+            if (Cart.Count == 0) { PaymentLines.Clear(); RaisePayments(); Status = "Carrinho vazio: os pagamentos lançados foram retirados."; }
+            else if (PaymentLines.Where(l => l.Method != PaymentSplit.Cash).Sum(l => l.Cents) > TotalCents)
+                Status = "Os pagamentos lançados passam do novo total. Remova um pagamento (X) e lance de novo.";
+            else if (PaidLinesCents > TotalCents) Status = $"Troco a devolver: {AppServices.Money(PaidLinesCents - TotalCents)}. Finalize a venda.";
+        });
         FinishCommand = RelayCommand.Sync(_ => Finish(), _ => Cart.Count > 0 && CashOpen && _shell.SaleDone is null);
         // Regras: caixa só abre com a loja aberta; loja só fecha com o caixa fechado (o servidor revalida para todos os caixas).
         OpenCashCommand = RelayCommand.Sync(_ => AskOpenCash(), _ => !CashOpen && _storeOpen != false);
@@ -1019,10 +1103,88 @@ public sealed class PosViewModel : ObservableObject
         // Pagamentos já lançados + o valor digitado agora (vazio = o que falta, na forma escolhida).
         var parts = PaymentLines.Select(p => (p.Method, p.Cents)).ToList();
         var remaining = PaymentSplit.Remaining(total, parts);
+        // Valor menor que o que falta: lança como parte do pagamento e mostra quanto ainda falta (ex.: R$ 10 no
+        // dinheiro de uma compra de R$ 20; o resto vai no PIX ou no cartão).
+        if (typed > 0 && typed < remaining)
+        {
+            if (Method.Method == 5 && _customer is null) { Status = "Fiado: identifique o cliente antes de lançar."; return; }
+            var method = Method;
+            void AddPart()
+            {
+                PaymentLines.Add(new PaymentLine(method.Method, method.Name, typed));
+                Paid = "";
+                RaisePayments();
+                Status = $"Recebido {AppServices.Money(typed)} em {method.Name}. Falta pagar {AppServices.Money(remaining - typed)}: escolha a forma e finalize.";
+            }
+            if (method.Method == 5) _ = CheckCreditThenAsync(PaymentLines.Where(l => l.Method == 5).Sum(l => l.Cents) + typed, AddPart);
+            else AddPart();
+            return;
+        }
         if (typed > 0 || remaining > 0) parts.Add((Method.Method, typed > 0 ? typed : remaining));
         var check = PaymentSplit.Validate(total, parts);
         if (!check.Ok) { Status = check.Error!; return; }
         if (parts.Any(p => p.Method == 5) && _customer is null) { Status = "Fiado: identifique o cliente antes de finalizar."; return; }
+        var onCredit = parts.Where(p => p.Method == 5).Sum(p => p.Cents);
+        if (onCredit > 0) { _ = CheckCreditThenAsync(onCredit, () => ConfirmAndProceed(parts)); return; }
+        ConfirmAndProceed(parts);
+    }
+
+    private bool _checkingCredit;
+
+    /// <summary>
+    /// Fiado (crediário): só segue se o cliente tiver limite disponível para o valor. Sem limite, ou sem internet para
+    /// conferir, mostra o motivo na tela e a venda NÃO é finalizada (continua aberta para trocar a forma de pagamento).
+    /// </summary>
+    private async Task CheckCreditThenAsync(long amountCents, Action onAllowed)
+    {
+        if (_checkingCredit || _customer is null) return;
+        _checkingCredit = true;
+        Status = "Conferindo o limite do crediário...";
+        string? refusal;
+        try
+        {
+            var r = await S.Api.GetAsync($"/api/v1/pos/customers/{_customer.Id}/credit-check?amountCents={amountCents}");
+            var available = r.GetProperty("availableCents").GetInt64();
+            refusal = r.GetProperty("allowed").GetBoolean() ? null
+                : !r.GetProperty("hasLimit").GetBoolean() ? $"{_customer.Name} não tem limite liberado para comprar no crediário."
+                : $"Limite insuficiente: {_customer.Name} tem {AppServices.Money(available)} disponível e esta compra precisa de {AppServices.Money(amountCents)} no crediário.";
+        }
+        catch (ApiException ex) { refusal = "Não foi possível conferir o limite do crediário (" + ex.Code + ")."; }
+        catch (HttpRequestException) { refusal = "Sem internet: não dá para conferir o limite do crediário agora."; }
+        catch (TaskCanceledException) { refusal = "O servidor demorou para responder: não dá para conferir o limite do crediário agora."; }
+        finally { _checkingCredit = false; }
+        if (refusal is null) { Status = ""; onAllowed(); return; }
+        Status = refusal + " A venda não foi finalizada.";
+        _shell.ShowPrompt(new PromptViewModel
+        {
+            Title = "Crediário não autorizado",
+            Message = refusal + "\n\nA venda NÃO foi finalizada. Receba o valor em outra forma de pagamento (dinheiro, PIX ou cartão) ou tire um item.",
+            ConfirmText = "Entendi",
+        }, _ => Task.FromResult(true));
+    }
+
+    private void ConfirmAndProceed(List<(int Method, long Cents)> parts)
+    {
+        // Cartão (e PIX sem QR automático) é passado fora do sistema: confirma antes de registrar. "Voltar" mantém a
+        // venda aberta para tirar um item ou trocar a forma, quando o cartão é recusado ou o saldo não dá.
+        var external = parts.Where(p => p.Method is 2 or 3 || (p.Method == 4 && !_pixDynamic)).ToList();
+        if (external.Count > 0)
+        {
+            var lines = string.Join("\n", external.GroupBy(p => p.Method).Select(g => $"• {PaymentOptions.First(o => o.Method == g.Key).Name}: {AppServices.Money(g.Sum(x => x.Cents))}"));
+            _shell.ShowPrompt(new PromptViewModel
+            {
+                Title = "Confirme o pagamento",
+                Message = $"Passe na maquininha (ou confira o PIX):\n{lines}\n\nRecusado ou sem saldo? Toque em Voltar: a venda continua aberta para tirar um item ou mudar a forma de pagamento.",
+                ConfirmText = "Aprovado — finalizar",
+            }, _ => { Proceed(parts); return Task.FromResult(true); },
+            () => Status = "Venda continua aberta: tire um item na lixeira ou escolha outra forma de pagamento.");
+            return;
+        }
+        Proceed(parts);
+    }
+
+    private void Proceed(List<(int Method, long Cents)> parts)
+    {
         var pixCents = parts.Where(p => p.Method == 4).Sum(p => p.Cents);
         if (_pixDynamic && pixCents > 0)
         {

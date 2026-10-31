@@ -38,10 +38,63 @@
                 <Grid>
                     <TextBlock Text="Selecione um cliente." Style="{StaticResource Muted}" Visibility="{Binding HasSelection, Converter={StaticResource Vis}, ConverterParameter=not}"/>
                     <DockPanel Visibility="{Binding HasSelection, Converter={StaticResource Vis}}">
-                        <TextBlock DockPanel.Dock="Top" Text="{Binding DetailTitle}" Foreground="White" FontSize="20" FontWeight="Bold"/>
-                        <TextBlock DockPanel.Dock="Top" Text="{Binding DetailInfo}" Style="{StaticResource Muted}" Margin="0,4,0,6"/>
-                        <TextBlock DockPanel.Dock="Top" Text="{Binding PointsText}" Foreground="{DynamicResource WarnBrush}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"
-                                   Visibility="{Binding PointsText, Converter={StaticResource Vis}}"/>
+                        <Grid DockPanel.Dock="Top">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding DetailTitle}" Foreground="White" FontSize="20" FontWeight="Bold"/>
+                                <TextBlock Text="{Binding DetailInfo}" Style="{StaticResource Muted}" Margin="0,4,0,6" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding PointsText}" Foreground="{DynamicResource WarnBrush}" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"
+                                           Visibility="{Binding PointsText, Converter={StaticResource Vis}}"/>
+                            </StackPanel>
+                            <!-- Melhor dia para cobrar: todo mês o WhatsApp da loja manda o saldo e as compras do cliente -->
+                            <Button Grid.Column="1" Command="{Binding BillingDayCommand}" Cursor="Hand" Margin="12,0,12,0" VerticalAlignment="Top"
+                                    Visibility="{Binding CanBilling, Converter={StaticResource Vis}}" ToolTip="Escolher o dia do mês da cobrança automática" AutomationProperties.Name="Dia de cobrança">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource DarkBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14,8" MinWidth="220">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE787;" Foreground="{DynamicResource AccentBrush}" FontSize="16" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="Dia de cobrança" Foreground="White" FontWeight="SemiBold"/>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding BillingText}" Foreground="{DynamicResource MutedBrush}" FontSize="13" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.6"/></Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                            <!-- Cobrar agora pelo WhatsApp da loja -->
+                            <Button Grid.Column="2" Width="54" Height="54" Cursor="Hand" VerticalAlignment="Top" Command="{Binding ChargeWhatsAppCommand}"
+                                    Visibility="{Binding CanBilling, Converter={StaticResource Vis}}" ToolTip="Mandar a cobrança do fiado pelo WhatsApp da loja" AutomationProperties.Name="Cobrar pelo WhatsApp">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
+                                            <Ellipse Fill="#25D366"/>
+                                            <Viewbox Width="30" Height="30">
+                                                <Canvas Width="24" Height="24">
+                                                    <Path Stroke="White" StrokeThickness="1.8" StrokeLineJoin="Round" Data="M 3.6,20.4 L 4.8,16.3 A 8.6,8.6 0 1 1 7.9,19.3 Z"/>
+                                                    <Path Fill="White" Data="M 9.1,7.4 C 9.4,7.4 9.6,7.5 9.7,7.8 L 10.5,9.6 C 10.6,9.9 10.5,10.2 10.3,10.4 L 9.8,10.9 C 10.4,12.1 11.4,13.1 12.7,13.8 L 13.2,13.3 C 13.4,13.1 13.7,13 14,13.1 L 15.8,13.9 C 16.1,14 16.2,14.3 16.2,14.6 L 16.1,15.5 C 16,16 15.6,16.4 15.1,16.4 C 11.3,16.4 7.3,12.5 7.3,8.6 C 7.3,8.1 7.7,7.6 8.2,7.5 Z"/>
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Root" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.08" ScaleY="1.08"/></Setter.Value></Setter>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Root" Property="Opacity" Value="0.5"/></Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                        </Grid>
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="{Binding CreditText, Converter={StaticResource Vis}}">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                 <Button Style="{StaticResource DarkButton}" Content="Limite" Height="34" Padding="12,0" Margin="0,0,8,0" Command="{Binding LimitCommand}"/>

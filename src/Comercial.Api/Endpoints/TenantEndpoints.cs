@@ -30,7 +30,16 @@ public static class TenantEndpoints
         // "Esqueci minha senha": resposta sempre igual (não revela se o e-mail existe).
         // Cadastro com teste grátis (público, com limite por IP).
         var pub = app.MapGroup("/api/v1/public").RequireRateLimiting("auth");
-        pub.MapGet("/mobile/latest", async (PlatformSettingsService s) => await s.MobileReleaseAsync() is { } r ? Results.Ok(r) : Results.NoContent());
+        // A versão mais nova entre a publicada no painel e o último APK gerado no servidor (mobile-latest.json).
+        // "path" (relativo) é o que o app usa a partir da 1.0.8; "url" completo mantém funcionando os apps antigos.
+        pub.MapGet("/mobile/latest", async (PlatformSettingsService s, IConfiguration cfg, IHostEnvironment env, HttpRequest req) =>
+        {
+            var published = await s.MobileReleaseAsync();
+            var local = DownloadsFolder.LatestApk(cfg, env);
+            if (local is not null && (published is null || local.VersionCode > published.VersionCode))
+                return Results.Ok(new { local.VersionCode, local.VersionName, url = $"{req.Scheme}://{req.Host}{local.Url}", path = local.Url, local.Notes, local.Mandatory });
+            return published is null ? Results.NoContent() : Results.Ok(published);
+        });
         pub.MapGet("/support", async (PlatformSettingsService s) => Results.Ok(await s.SupportContactAsync()));
         pub.MapGet("/desktop/latest", async (DesktopReleaseService s) => await s.LatestAsync() is { } r ? Results.Ok(r) : Results.NoContent());
         pub.MapPost("/signup", async (SignupRequest r, SignupService s) => Results.Ok(await s.StartAsync(r)));
@@ -133,6 +142,11 @@ public static class TenantEndpoints
             Validate(r);
             var p = await l.GetAsync<Product>(id);
             if (r.ExpectedVersion is { } ev && ev != p.Version) throw new DomainException("version_conflict", "Produto alterado por outro usuário. Recarregue.", 409);
+            // Editar também não pode repetir SKU nem código de barras de outro produto.
+            if (r.Sku.Trim() != p.Sku && await db.Products.AnyAsync(x => x.Id != id && x.Sku == r.Sku.Trim()))
+                throw new DomainException("sku_taken", "SKU já cadastrado.", 409);
+            if (!string.IsNullOrWhiteSpace(r.Barcode) && r.Barcode.Trim() != p.Barcode && await BarcodeInUseAsync(db, r.Barcode.Trim(), id))
+                throw new DomainException("barcode_taken", "Este código de barras já pertence a outro produto.", 409);
             var before = new { p.PriceCents, p.CostCents, p.Name };
             Apply(p, r);
             p.Version++;
@@ -706,8 +720,9 @@ public static class TenantEndpoints
     }
 
     /// <summary>Código já usado como código de barras principal, código extra ou SKU de outro produto.</summary>
-    private static async Task<bool> BarcodeInUseAsync(AppDbContext db, string code) =>
-        await db.Products.AnyAsync(p => p.Barcode == code || p.Sku == code) || await db.ProductBarcodes.AnyAsync(x => x.Code == code);
+    private static async Task<bool> BarcodeInUseAsync(AppDbContext db, string code, Guid? except = null) =>
+        await db.Products.AnyAsync(p => p.Id != except && (p.Barcode == code || p.Sku == code))
+        || await db.ProductBarcodes.AnyAsync(x => x.ProductId != except && x.Code == code);
 
     private static void Validate(ProductInput r)
     {

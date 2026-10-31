@@ -40,6 +40,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
     public DbSet<EmailMessage> EmailMessages => Set<EmailMessage>();
     public DbSet<TenantPaymentSettings> TenantPaymentSettings => Set<TenantPaymentSettings>();
     public DbSet<PosPixCharge> PosPixCharges => Set<PosPixCharge>();
+    public DbSet<TenantWhatsAppSettings> WhatsAppSettings => Set<TenantWhatsAppSettings>();
+    public DbSet<WhatsAppMessage> WhatsAppMessages => Set<WhatsAppMessage>();
+    public DbSet<WhatsAppCampaign> WhatsAppCampaigns => Set<WhatsAppCampaign>();
     public DbSet<TenantFiscalProfile> FiscalProfiles => Set<TenantFiscalProfile>();
     public DbSet<ProductBarcode> ProductBarcodes => Set<ProductBarcode>();
     public DbSet<ProductBatch> ProductBatches => Set<ProductBatch>();
@@ -301,6 +304,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext
         m.Entity<FiscalNumberVoid>(e => e.ToTable("fiscal_number_voids"));
         m.Entity<NfseDocument>(e => { e.ToTable("nfse_documents"); e.HasIndex(x => x.InvoiceId).IsUnique(); });
         m.Entity<TenantPaymentSettings>(e => { e.ToTable("tenant_payment_settings"); e.HasKey(x => x.TenantId); e.Property(x => x.MpAccountLabel).HasMaxLength(200); });
+        m.Entity<TenantWhatsAppSettings>(e =>
+        {
+            e.ToTable("tenant_whatsapp_settings"); e.HasKey(x => x.TenantId);
+            e.Property(x => x.PhoneNumberId).HasMaxLength(40); e.Property(x => x.DisplayPhone).HasMaxLength(40); e.Property(x => x.VerifiedName).HasMaxLength(200);
+            e.Property(x => x.WebhookVerifyToken).HasMaxLength(64); e.Property(x => x.ChargeTemplate).HasMaxLength(100);
+            e.Property(x => x.PromoTemplate).HasMaxLength(100); e.Property(x => x.Language).HasMaxLength(10);
+        });
+        m.Entity<WhatsAppMessage>(e =>
+        {
+            e.ToTable("whatsapp_messages");
+            e.HasIndex(x => new { x.TenantId, x.Kind, x.CreatedAt });
+            e.HasIndex(x => new { x.TenantId, x.CampaignId, x.CustomerId });
+            e.Property(x => x.Kind).HasMaxLength(20); e.Property(x => x.Phone).HasMaxLength(20); e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.ProviderMessageId).HasMaxLength(200); e.Property(x => x.Error).HasMaxLength(500); e.Property(x => x.Preview).HasMaxLength(2000);
+        });
+        m.Entity<WhatsAppCampaign>(e =>
+        {
+            e.ToTable("whatsapp_campaigns");
+            e.HasIndex(x => new { x.TenantId, x.Status, x.ScheduledAt });
+            e.Property(x => x.Title).HasMaxLength(100); e.Property(x => x.Message).HasMaxLength(600);
+            e.Property(x => x.Status).HasMaxLength(20); e.Property(x => x.StopReason).HasMaxLength(300);
+        });
         m.Entity<PosPixCharge>(e =>
         {
             e.ToTable("pos_pix_charges");

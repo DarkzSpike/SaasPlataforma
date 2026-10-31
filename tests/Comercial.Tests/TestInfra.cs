@@ -52,6 +52,10 @@ public class ApiFactory : WebApplicationFactory<Program>
         b.UseSetting("Email:AutoRun", "false");
         b.UseSetting("Fiscal:AutoRun", "false");
         b.UseSetting("Accountant:AutoRun", "false");
+        b.UseSetting("WhatsApp:AutoRun", "false");
+        b.UseSetting("WhatsApp:DelayMs", "0");
+        b.UseSetting("WhatsApp:SendFromHour", "0");
+        b.UseSetting("WhatsApp:SendUntilHour", "24");
         b.UseSetting("Jwt:TenantSigningKey", TenantJwtKey);
         b.UseSetting("Storage:Root", StorageRoot);
         b.UseSetting("Payments:generic:WebhookSecret", WebhookSecret);

@@ -9,7 +9,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $s = Get-Content (Join-Path $PSScriptRoot 'dev-secrets.local.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $common = @("--Bootstrap:AdminEmail=$($s.AdminEmail)", "--Bootstrap:AdminPassword=$($s.AdminPassword)", "--Bootstrap:AdminTotpSecret=$($s.AdminTotpSecret)",
-            "--Payments:generic:WebhookSecret=$($s.WebhookSecret)")
+            "--Payments:generic:WebhookSecret=$($s.WebhookSecret)",
+            # Chaves de desenvolvimento persistentes (reiniciar a API não derruba login nem licença dos caixas).
+            "--Dev:KeysFile=$(Join-Path $root 'dev-data/dev-keys.local.json')")
 Set-Location (Join-Path $root 'src/Comercial.Api')
 
 # Uma API já aberta (outro terminal) trava as DLLs e a porta 5080: encerra antes de compilar.

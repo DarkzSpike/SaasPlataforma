@@ -97,6 +97,22 @@ public class CatalogExtrasTests(ApiFactory f) : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Editar_produto_nao_repete_codigo_de_barras_nem_sku()
+    {
+        var (t, _) = await Store();
+        var a = await api.CreateProduct(t.OwnerToken, "ED12");
+        var b = await api.CreateProduct(t.OwnerToken, "ED34");
+        object Body(string sku, string? barcode) => new { sku, barcode, name = "Produto " + sku, unit = "UN", priceCents = 1000, costCents = 600, minStock = 0m };
+        Assert.Equal("barcode_taken", await Api.Code(await api.Put($"/api/v1/products/{b}", t.OwnerToken, Body("ED34", "789ED12"))));
+        Assert.Equal("sku_taken", await Api.Code(await api.Put($"/api/v1/products/{b}", t.OwnerToken, Body("ED12", "789ED34"))));
+        // O próprio código continua valendo ao salvar; e um código gerado pelo sistema nunca colide.
+        await Api.Expect(await api.Put($"/api/v1/products/{a}", t.OwnerToken, Body("ED12", "789ED12")), HttpStatusCode.OK);
+        var gen = (await Api.Expect(await api.Post("/api/v1/products/barcode/generate", t.OwnerToken, new { }), HttpStatusCode.OK)).GetProperty("barcode").GetString();
+        await Api.Expect(await api.Put($"/api/v1/products/{b}", t.OwnerToken, Body("ED34", gen)), HttpStatusCode.OK);
+        Assert.Equal("barcode_taken", await Api.Code(await api.Put($"/api/v1/products/{a}", t.OwnerToken, Body("ED12", gen))));
+    }
+
+    [Fact]
     public async Task Promocao_e_cupom_aplicados_pelo_servidor()
     {
         var (t, cash) = await Store();
@@ -129,6 +145,10 @@ public class CatalogExtrasTests(ApiFactory f) : IClassFixture<ApiFactory>
         Assert.Equal("customer_required", await Api.Code(await api.Post("/api/v1/sales", t.OwnerToken, Api.Sale(t.StoreId, cash, p) with { Payments = [.. fiado] })));
         var (_, op, _) = await api.CreateUser(t, "operator");
         Assert.Equal(HttpStatusCode.Forbidden, (await api.Put($"/api/v1/customers/{cust}/credit-limit", op, new { limitCents = 999999 })).StatusCode);
+        // O caixa confere o limite antes de finalizar (o operador consegue, sem ver o extrato do cliente).
+        var semLimite = await Api.Expect(await api.Get($"/api/v1/pos/customers/{cust}/credit-check?amountCents=3000", op), HttpStatusCode.OK);
+        Assert.False(semLimite.GetProperty("allowed").GetBoolean());
+        Assert.False(semLimite.GetProperty("hasLimit").GetBoolean());
         await Api.Expect(await api.Put($"/api/v1/customers/{cust}/credit-limit", t.OwnerToken, new { limitCents = 5000 }), HttpStatusCode.OK);
 
         await Api.Expect(await api.Post("/api/v1/sales", t.OwnerToken, Api.Sale(t.StoreId, cash, p) with { Payments = [.. fiado], CustomerId = cust }), HttpStatusCode.Created);
@@ -136,6 +156,10 @@ public class CatalogExtrasTests(ApiFactory f) : IClassFixture<ApiFactory>
         var st = await Api.Expect(await api.Get($"/api/v1/customers/{cust}/credit", t.OwnerToken), HttpStatusCode.OK);
         Assert.Equal(3000, st.GetProperty("openCents").GetInt64());
         Assert.Equal(2000, st.GetProperty("availableCents").GetInt64());
+        Assert.True((await Api.Expect(await api.Get($"/api/v1/pos/customers/{cust}/credit-check?amountCents=2000", op), HttpStatusCode.OK)).GetProperty("allowed").GetBoolean());
+        var passa = await Api.Expect(await api.Get($"/api/v1/pos/customers/{cust}/credit-check?amountCents=2500", op), HttpStatusCode.OK);
+        Assert.False(passa.GetProperty("allowed").GetBoolean());
+        Assert.Equal(2000, passa.GetProperty("availableCents").GetInt64());
 
         var before = (await Api.Expect(await api.Get("/api/v1/cash/sessions/current", t.OwnerToken), HttpStatusCode.OK)).GetProperty("expectedCashCents").GetInt64();
         var after = await Api.Expect(await api.Post($"/api/v1/customers/{cust}/credit/receive", t.OwnerToken, new { amountCents = 1000, method = 1 }), HttpStatusCode.OK);

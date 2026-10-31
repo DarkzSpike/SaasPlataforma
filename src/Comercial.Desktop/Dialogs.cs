@@ -54,6 +54,11 @@ public sealed class FormField(string key, string label, string value = "", strin
     public bool IsReadOnly { get => _readOnly; set => Set(ref _readOnly, value); }
     public string Note { get => _note; set { if (Set(ref _note, value)) Raise(nameof(HasNote)); } }
     public bool HasNote => Note.Length > 0;
+
+    // Botão ao lado do campo (ex.: "Gerar código" no código de barras).
+    public string ActionText { get; init; } = "";
+    public RelayCommand? ActionCommand { get; init; }
+    public bool HasAction => ActionCommand is not null && IsText;
 }
 
 /// <summary>Formulário sobreposto (campos de texto + foto opcional), usado no cadastro de produto e na entrada de estoque.</summary>

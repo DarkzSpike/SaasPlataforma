@@ -20,6 +20,9 @@ public sealed class DesktopSettings
     public Guid? StoreId { get; set; }
     /// <summary>Impressora, gaveta, balança e etiquetas deste terminal.</summary>
     public DeviceSettings Devices { get; set; } = new();
+    /// <summary>Menu lateral deste computador (engrenagem): ordem dos ícones e os que ficam escondidos.</summary>
+    public List<string> NavOrder { get; set; } = [];
+    public List<string> NavHidden { get; set; } = [];
 
     public static string DataDir
     {

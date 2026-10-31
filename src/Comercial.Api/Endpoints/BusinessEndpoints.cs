@@ -190,6 +190,14 @@ public static class BusinessEndpoints
         // ---------- Fiado (crediário) ----------
         api.MapGet("/customers/{id:guid}/credit", async (Guid id, CreditService s) => Results.Ok(await s.StatementAsync(id)))
             .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.CustomersRead);
+        // Caixa: confere o limite ANTES de finalizar uma venda com parte no fiado (o servidor confere de novo ao receber a
+        // venda). Devolve só o necessário para o operador, sem o extrato do cliente.
+        api.MapGet("/pos/customers/{id:guid}/credit-check", async (Guid id, long amountCents, CreditService s, ScopedLookup l) =>
+        {
+            var c = await l.GetAsync<Customer>(id);
+            var available = Math.Max(0, c.CreditLimitCents - await s.OpenBalanceAsync(id));
+            return Results.Ok(new { allowed = c.CreditLimitCents > 0 && amountCents > 0 && amountCents <= available, hasLimit = c.CreditLimitCents > 0, availableCents = available });
+        }).RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
         api.MapPost("/customers/{id:guid}/credit/receive", async (Guid id, ReceiveCreditRequest r, CreditService s) => Results.Ok(await s.ReceiveAsync(id, r)))
             .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.CashOperate, write: true);
         api.MapPut("/customers/{id:guid}/credit-limit", async (Guid id, CreditLimitRequest r, AppDbContext db, ScopedLookup l, AuditService audit, RequestActor a) =>
@@ -201,6 +209,32 @@ public static class BusinessEndpoints
             await db.SaveChangesAsync();
             return Results.Ok(new { c.Id, c.CreditLimitCents });
         }).RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceManage);
+
+        // ---------- WhatsApp da loja (API oficial): cobrança do fiado e campanhas ----------
+        api.MapPut("/customers/{id:guid}/billing-day", async (Guid id, BillingDayRequest r, WhatsAppService s) => { await s.SetBillingDayAsync(id, r.Day); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceManage, write: true);
+        api.MapGet("/customers/{id:guid}/charge-preview", async (Guid id, WhatsAppService s) => Results.Ok(await s.ChargePreviewAsync(id)))
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceRead);
+        api.MapPost("/customers/{id:guid}/charge", async (Guid id, WhatsAppService s, CancellationToken ct) =>
+        {
+            var m = await s.SendChargeAsync(id, automatic: false, ct);
+            return Results.Ok(new { m.Id, m.Status, m.Preview });
+        }).RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceManage, write: true);
+        var wa = api.MapGroup("/whatsapp");
+        wa.MapGet("/settings", async (WhatsAppService s) => Results.Ok(await s.GetSettingsAsync()))
+            .RequireFeature(ModuleKeys.Crm, Permissions.MessagingManage);
+        wa.MapPut("/settings", async (WhatsAppSettingsRequest r, WhatsAppService s, CancellationToken ct) => Results.Ok(await s.SaveSettingsAsync(r, ct)))
+            .RequireFeature(ModuleKeys.Crm, Permissions.MessagingManage, write: true);
+        wa.MapPost("/test", async (WhatsAppTestRequest r, WhatsAppService s, CancellationToken ct) => Results.Ok(await s.TestAsync(r, ct)))
+            .RequireFeature(ModuleKeys.Crm, Permissions.MessagingManage, write: true);
+        wa.MapGet("/messages", async (string? kind, WhatsAppService s) => Results.Ok(await s.MessagesAsync(kind)))
+            .RequireFeature(ModuleKeys.Crm, Permissions.MessagingManage);
+        wa.MapGet("/campaigns", async (WhatsAppService s) => Results.Ok(await s.CampaignsAsync()))
+            .RequireFeature(ModuleKeys.Campaigns, Permissions.MessagingManage);
+        wa.MapPost("/campaigns", async (CampaignRequest r, WhatsAppService s) => Results.Ok(await s.CreateCampaignAsync(r)))
+            .RequireFeature(ModuleKeys.Campaigns, Permissions.MessagingManage, write: true);
+        wa.MapPost("/campaigns/{id:guid}/cancel", async (Guid id, WhatsAppService s) => { await s.CancelCampaignAsync(id); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Campaigns, Permissions.MessagingManage, write: true);
 
         var cus = api.MapGroup("/customers");
         cus.MapGet("/", async (AppDbContext db, string? q) =>

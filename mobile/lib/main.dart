@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'core/api_client.dart';
@@ -9,8 +11,10 @@ import 'core/session.dart';
 import 'core/session_store.dart';
 import 'features/invoices.dart';
 import 'features/notifications.dart';
+import 'features/finance.dart';
 import 'features/owner.dart';
 import 'features/products.dart';
+import 'features/team.dart';
 
 void main() => runApp(const ComercialApp());
 
@@ -20,7 +24,10 @@ class ComercialApp extends StatefulWidget {
   State<ComercialApp> createState() => _ComercialAppState();
 }
 
-class _ComercialAppState extends State<ComercialApp> {
+class _ComercialAppState extends State<ComercialApp> with WidgetsBindingObserver {
+  // Uma por identidade visual: o MaterialApp é recriado quando a marca muda (ValueKey abaixo).
+  var navigatorKey = GlobalKey<NavigatorState>();
+  String _navigatorFor = '';
   final server = ServerConfig();
   final api = ApiClient(defaultApiBaseUrl, SessionStore());
   Branding branding = Branding.fallback();
@@ -28,30 +35,66 @@ class _ComercialAppState extends State<ComercialApp> {
   AppUpdate? update;
   SupportContact? support;
   String? tenantCode;
+  Timer? _updateTimer;
+  int _offeredVersion = 0; // pergunta uma vez por versão; a faixa no topo continua visível
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _start();
+    _updateTimer = Timer.periodic(const Duration(minutes: 30), (_) => _checkUpdate());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _updateTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Ao voltar para o app, confere de novo se saiu versão nova.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkUpdate();
+  }
+
+  Future<void> _checkUpdate() async {
+    final u = await AppUpdate.check(api);
+    if (!mounted) return;
+    setState(() => update = u);
+    if (u != null && u.versionCode != _offeredVersion) {
+      _offeredVersion = u.versionCode;
+      // Espera a primeira tela aparecer para poder mostrar a pergunta.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null) UpdateFlow.offer(ctx, u);
+      });
+    }
+  }
+
+  void _runUpdate() {
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null && update != null) UpdateFlow.run(ctx, update!);
   }
 
   Future<void> _start() async {
     api.baseUrl = await server.read();
     tenantCode = await api.store.readTenantCode();
-    _loadExtras();
     final ok = await api.tryRestore().catchError((_) => false);
     if (ok) {
       await _loadBranding();
       PushRegistration.register(api);
     }
     setState(() => loggedIn = ok);
+    _loadExtras(); // depois da marca: a pergunta de atualização não some quando a tela é recriada
   }
 
   /// Aviso de versão nova e WhatsApp de atendimento (funcionam sem login).
   Future<void> _loadExtras() async {
-    final u = await AppUpdate.check(api);
     final s = await SupportContact.load(api);
-    if (mounted) setState(() { update = u; support = s; });
+    if (mounted) setState(() => support = s);
+    await _checkUpdate();
   }
 
   Future<void> _onServerChanged(String url) async {
@@ -75,6 +118,8 @@ class _ComercialAppState extends State<ComercialApp> {
     await _loadBranding();
     PushRegistration.register(api); // aviso de quebra de caixa no celular do dono
     setState(() => loggedIn = true);
+    _offeredVersion = 0; // a tela foi recriada com a marca da empresa: pergunta de novo se havia versão nova
+    _checkUpdate();
   }
 
   Future<void> _onLogout() async {
@@ -87,8 +132,13 @@ class _ComercialAppState extends State<ComercialApp> {
 
   @override
   Widget build(BuildContext context) {
+    if (_navigatorFor != branding.cacheKey) {
+      _navigatorFor = branding.cacheKey;
+      navigatorKey = GlobalKey<NavigatorState>();
+    }
     return MaterialApp(
       key: ValueKey(branding.cacheKey),
+      navigatorKey: navigatorKey,
       title: branding.systemName,
       theme: branding.theme(Brightness.light),
       darkTheme: branding.theme(Brightness.dark),
@@ -96,7 +146,7 @@ class _ComercialAppState extends State<ComercialApp> {
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(branding.fontScale)),
         child: Column(children: [
-          if (update != null) UpdateBanner(update: update!),
+          if (update != null) UpdateBanner(update: update!, onUpdate: _runUpdate),
           Expanded(child: child!),
         ]),
       ),
@@ -173,6 +223,8 @@ class _HomeShellState extends State<HomeShell> {
         (page: ProductsPage(api: widget.api, me: m, storeId: storeId!), dest: const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Produtos'), fab: false),
       if (m.managesTeam)
         (page: TeamPage(api: widget.api), dest: const NavigationDestination(icon: Icon(Icons.group_outlined), label: 'Equipe'), fab: true),
+      if (m.seesFinance)
+        (page: FinancePage(api: widget.api, me: m), dest: const NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Financeiro'), fab: true),
       if (m.seesDashboard)
         (page: Scaffold(appBar: AppBar(title: const Text('Avisos')), body: NotificationsPage(api: widget.api, canPay: m.paysInvoices)),
           dest: const NavigationDestination(icon: Icon(Icons.notifications_outlined), label: 'Avisos'), fab: true),
@@ -194,6 +246,8 @@ class _HomeShellState extends State<HomeShell> {
       bottomNavigationBar: tabs.length < 2 ? null : NavigationBar(
         selectedIndex: i,
         onDestinationSelected: (v) => setState(() => index = v),
+        // Com muitas abas, só a escolhida mostra o nome (os ícones continuam todos visíveis).
+        labelBehavior: tabs.length > 5 ? NavigationDestinationLabelBehavior.onlyShowSelected : null,
         destinations: [for (final t in tabs) t.dest],
       ),
     );

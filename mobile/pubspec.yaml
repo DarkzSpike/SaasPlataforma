@@ -2,7 +2,7 @@ name: comercial_app
 description: Aplicativo do proprietário (Android e iOS) — dashboard da plataforma de gestão comercial.
 publish_to: "none"
 # versionName+versionCode: o dev/build-apk.ps1 sobe o número a cada build (o app avisa quando há versão maior).
-version: 1.0.6+7
+version: 1.0.8+9
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

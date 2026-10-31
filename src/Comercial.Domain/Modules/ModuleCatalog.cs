@@ -118,7 +118,7 @@ public static class ModuleCatalogSeed
             M(ModuleKeys.Crm, "CRM", "D - Clientes", B, "Clientes, histórico de compras, consentimento de marketing e LGPD (exportação e anonimização)."),
             M(ModuleKeys.Loyalty, "Fidelidade", "D - Clientes", B, "Pontos por compra, resgate como desconto, validade, extrato e estorno em cancelamentos/devoluções.", ModuleKeys.Crm, ModuleKeys.Pdv),
             M(ModuleKeys.Coupons, "Cupons e promoções", "D - Clientes", P, "Cupons, combos, regras por período.", ModuleKeys.Pdv),
-            M(ModuleKeys.Campaigns, "Campanhas", "D - Clientes", P, "Campanhas com controle de consentimento.", ModuleKeys.Crm),
+            M(ModuleKeys.Campaigns, "Campanhas", "D - Clientes", B, "Promoções pelo WhatsApp da loja (API oficial) só para quem aceitou ofertas, com limite diário e descadastro por SAIR.", ModuleKeys.Crm),
             // E — Funcionários
             M(ModuleKeys.UsersAdvanced, "Usuários e permissões avançadas", "E - Funcionários", B, "Permissões individuais, restrição por loja, revogação de sessões."),
             M(ModuleKeys.StoreHours, "Horários de funcionamento", "E - Funcionários", R, "Abertura/fechamento real, offline e correções auditáveis."),

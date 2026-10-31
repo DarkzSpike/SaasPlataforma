@@ -71,6 +71,7 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<EmailSender>();
 builder.Services.AddScoped<PasswordResetService>();
 builder.Services.AddScoped<StorePixService>();
+builder.Services.AddScoped<WhatsAppService>();
 builder.Services.AddScoped<NfseService>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PromotionService>();
@@ -95,6 +96,13 @@ builder.Services.AddSingleton<IEmailTransport, SmtpEmailTransport>();
 builder.Services.AddHostedService<EmailJob>();
 builder.Services.AddHttpClient<IMercadoPagoClient, MercadoPagoClient>(c => { c.BaseAddress = new Uri("https://api.mercadopago.com"); c.Timeout = TimeSpan.FromSeconds(20); });
 builder.Services.AddHostedService<BillingJob>();
+// WhatsApp da loja (API oficial da Meta): cobrança do fiado no dia escolhido e campanhas com limite anti-spam.
+builder.Services.AddHttpClient<IWhatsAppClient, WhatsAppCloudClient>(c =>
+{
+    c.BaseAddress = new Uri($"https://graph.facebook.com/{builder.Configuration["WhatsApp:GraphVersion"] ?? "v23.0"}/");
+    c.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddHostedService<WhatsAppJob>();
 builder.Services.AddSingleton<IDriveGateway, GoogleDriveGateway>();
 builder.Services.AddSingleton<IProductImageStore, LocalProductImageStore>();
 if (config["ProductImages:Provider"] == "GoogleDrive")
@@ -196,10 +204,23 @@ app.MapGet(GoogleOAuthService.CallbackPath, async (string? code, string? state, 
 app.MapGet("/downloads/{name}", (string name, IConfiguration cfg, IHostEnvironment env) =>
 {
     if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9._-]{1,80}\.apk$")) return Results.NotFound();
-    var dir = cfg["Downloads:Root"] ?? Path.Combine(cfg["Storage:Root"] ?? Path.Combine(env.ContentRootPath, "dev-data"), "downloads");
-    var path = Path.GetFullPath(Path.Combine(env.ContentRootPath, dir, name)); // Storage:Root pode ser relativo (dev-data/storage)
+    var path = Path.Combine(Comercial.Api.Services.DownloadsFolder.Dir(cfg, env), name); // Storage:Root pode ser relativo (dev-data/storage)
     return File.Exists(path) ? Results.File(path, "application/vnd.android.package-archive", name) : Results.NotFound();
 });
+// Avisos do WhatsApp da loja (Meta): confirmação do endereço e descadastro de quem responde SAIR. Assinado com a chave do app.
+app.MapGet("/webhooks/whatsapp/{tenantId:guid}", async (Guid tenantId, HttpRequest req, TenantContext tenant, RequestActor actor, WhatsAppService s) =>
+{
+    tenant.SetTenant(tenantId); actor.TenantId = tenantId;
+    var challenge = await s.VerifyWebhookAsync(req.Query["hub.mode"], req.Query["hub.verify_token"], req.Query["hub.challenge"]);
+    return challenge is null ? Results.StatusCode(403) : Results.Text(challenge);
+}).RequireRateLimiting("webhook");
+app.MapPost("/webhooks/whatsapp/{tenantId:guid}", async (Guid tenantId, HttpRequest req, TenantContext tenant, RequestActor actor, WhatsAppService s) =>
+{
+    tenant.SetTenant(tenantId); actor.TenantId = tenantId;
+    using var reader = new StreamReader(req.Body);
+    var body = await reader.ReadToEndAsync();
+    return await s.HandleWebhookAsync(body, req.Headers["X-Hub-Signature-256"]) ? Results.Ok() : Results.StatusCode(401);
+}).RequireRateLimiting("webhook");
 app.MapTenantApi();
 app.MapBusinessApi();
 app.MapFiscalAccountingApi();

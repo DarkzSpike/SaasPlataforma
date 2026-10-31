@@ -40,3 +40,5 @@ public partial class QuotesView : UserControl { public QuotesView() => Initializ
 public partial class ReportsView : UserControl { public ReportsView() => InitializeComponent(); }
 public partial class AccountView : UserControl { public AccountView() => InitializeComponent(); }
 public partial class HelpView : UserControl { public HelpView() => InitializeComponent(); }
+public partial class SettingsView : UserControl { public SettingsView() => InitializeComponent(); }
+public partial class CampaignsView : UserControl { public CampaignsView() => InitializeComponent(); }

@@ -58,6 +58,8 @@ public static class Permissions
     public const string PaymentsConfigure = "payments.configure";
     /// <summary>Entrar no aplicativo do celular (o dono libera para cada funcionário).</summary>
     public const string MobileAccess = "mobile.access";
+    /// <summary>Conectar o WhatsApp da loja, ver os envios e mandar campanhas de promoção.</summary>
+    public const string MessagingManage = "messaging.manage";
 
     /// <summary>Nomes em português para a tela de funcionários.</summary>
     public static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>
@@ -79,6 +81,7 @@ public static class Permissions
         [BillingManage] = "Ver e pagar as faturas do sistema",
         [PaymentsConfigure] = "Configurar recebimentos da loja (PIX no caixa)",
         [MobileAccess] = "Usar o app do celular",
+        [MessagingManage] = "WhatsApp da loja: conectar e enviar promoções",
     };
     public const string SalesReturn = "sales.return";
     /// <summary>Resolver vendas offline recusadas (reenviar com preço atual ou descartar com motivo).</summary>
@@ -103,7 +106,7 @@ public static class Permissions
         FiscalEmit, FiscalRead, ReportsRead, ReportsFinancial, UsersManage, DevicesManage, SupportApprove,
         SalesReturn, SyncReconcile, SuppliersManage, PurchasesManage, PurchasesApprove, PurchasesReceive,
         CustomersRead, CustomersManage, CustomersPrivacy, LoyaltyManage, FinanceRead, FinanceManage, ReportsExport, BillingManage, SalesDiscountAuthorize, PaymentsConfigure, MobileAccess,
-        FiscalExport, FiscalClose, FiscalSend
+        FiscalExport, FiscalClose, FiscalSend, MessagingManage
     ];
 
     private static readonly Dictionary<string, string[]> RoleMap = new()

@@ -4,7 +4,8 @@
 #   powershell -ExecutionPolicy Bypass -File dev\build-apk.ps1 -Publish -Notes "O que mudou"
 #
 # Parâmetros:
-#   -ApiUrl   endereço padrão gravado no app (padrão: IP deste computador na rede local, porta 5080).
+#   -ApiUrl   endereço padrão gravado no app (padrão: o túnel cloudflared aberto neste computador; sem túnel,
+#             o IP deste computador na rede local, porta 5080).
 #             Para produção: -ApiUrl https://api.seudominio.com.br
 #   -NoBump   não sobe o número da versão (use só para gerar de novo a mesma versão).
 #   -Publish  copia o APK para a pasta de downloads da API e publica a versão (painel → Atualizações).
@@ -20,7 +21,16 @@ $env:JAVA_HOME = 'E:\dev-tools\jdk17'
 $env:Path = "E:\dev-tools\flutter\bin;E:\dev-tools\jdk17\bin;$env:Path"
 $env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
 
-# IP do computador na rede local (o celular precisa estar no mesmo Wi-Fi/roteador).
+# Túnel do Cloudflare aberto neste computador (cloudflared): o app já sai conectado pela internet.
+if (-not $ApiUrl) {
+  foreach ($p in 20241..20245) {
+    try {
+      $t = Invoke-RestMethod "http://127.0.0.1:$p/quicktunnel" -TimeoutSec 2
+      if ($t.hostname) { $ApiUrl = "https://$($t.hostname)"; Write-Host "Usando o túnel da internet: $ApiUrl"; break }
+    } catch { }
+  }
+}
+# Sem túnel: IP do computador na rede local (o celular precisa estar no mesmo Wi-Fi/roteador).
 if (-not $ApiUrl) {
   $ip = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -match '^(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))' -and $_.PrefixOrigin -ne 'WellKnown' } |
     Sort-Object InterfaceMetric | Select-Object -First 1 -ExpandProperty IPAddress
@@ -78,8 +88,16 @@ if ($Publish) {
   $downloads = Join-Path $root 'src/Comercial.Api/dev-data/storage/downloads'   # mesma pasta que a API usa (Storage:Root/downloads)
   New-Item -ItemType Directory -Force $downloads | Out-Null
   Copy-Item $apk (Join-Path $downloads $name) -Force
+  # O servidor lê este arquivo: os celulares com versão menor perguntam "Atualizar agora?" ao abrir o app
+  # (não depende do login de administrador). O endereço é relativo: vale para a rede local e para a internet.
+  $manifest = [ordered]@{ versionCode = $code; versionName = $versionName; file = $name; notes = $Notes; mandatory = $false } | ConvertTo-Json
+  [IO.File]::WriteAllText((Join-Path $downloads 'mobile-latest.json'), $manifest, (New-Object Text.UTF8Encoding $false))
+  Write-Host "Versão $versionName disponível: os celulares vão perguntar 'Atualizar agora?' ao abrir o app." -ForegroundColor Green
   $s = Get-Content (Join-Path $PSScriptRoot 'dev-secrets.local.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   $totp = node (Join-Path $PSScriptRoot 'totp.js')
+  # Sem isto o script dizia "Publicado" mesmo quando o login do administrador era recusado.
+  $ErrorActionPreference = 'Stop'
+  try {
   $login = Invoke-RestMethod -Method Post "http://localhost:5080/admin/v1/auth/login" -ContentType 'application/json' `
     -Body (@{ email = $s.AdminEmail; password = $s.AdminPassword; totpCode = $totp } | ConvertTo-Json)
   $reauth = node (Join-Path $PSScriptRoot 'totp.js') 1   # código seguinte (o mesmo código não vale duas vezes)
@@ -89,4 +107,8 @@ if ($Publish) {
     -Headers @{ Authorization = "Bearer $($login.accessToken)"; 'X-Reauth-Totp' = $reauth } -Body $bytes | Out-Null
   Write-Host "Publicado: os celulares com versão menor que $versionName vão mostrar 'Nova versão' ao abrir o app." -ForegroundColor Green
   Write-Host "Download direto: $ApiUrl/downloads/$name"
+  } catch {
+    Write-Host "(Registro no painel admin não feito: $($_.Exception.Message). O aviso no app funciona mesmo assim.)" -ForegroundColor DarkGray
+    Write-Host "Download direto: $ApiUrl/downloads/$name"
+  }
 }

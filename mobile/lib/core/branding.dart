@@ -63,32 +63,80 @@ class Branding {
     );
   }
 
-  ThemeMode get themeMode => switch (defaultMode) { 'light' => ThemeMode.light, 'dark' => ThemeMode.dark, _ => ThemeMode.system };
+  /// O app segue o caixa (desktop): operação sempre no tema escuro com as cores da empresa.
+  /// Só fica claro se a empresa escolheu "claro" no editor de identidade visual.
+  ThemeMode get themeMode => defaultMode == 'light' ? ThemeMode.light : ThemeMode.dark;
 
-  double get _radius => switch (buttonStyle) { 'square' => 0, 'pill' => 999, _ => 8 };
+  double get _radius => switch (buttonStyle) { 'square' => 0, 'pill' => 999, _ => 10 };
+
+  static Color _mix(Color a, Color b, double t) => Color.lerp(a, b, t)!;
 
   ThemeData theme(Brightness b) {
     final dark = b == Brightness.dark;
+    // Mesmos tons derivados do caixa (AppServices.ApplyBranding): superfícies 2/3 e borda a partir da superfície.
+    final bg = dark ? darkBackground : background;
+    final surf = dark ? darkSurface : surface;
+    final fg = dark ? darkText : text;
+    final surf2 = dark ? _mix(darkSurface, Colors.white, 0.06) : _mix(surface, background, 0.5);
+    final surf3 = dark ? _mix(darkSurface, Colors.white, 0.12) : _mix(surface, Colors.black, 0.06);
+    final border = dark ? _mix(darkSurface, Colors.white, 0.10) : _mix(surface, Colors.black, 0.12);
+    final muted = _mix(fg, surf, 0.4);
+    const danger = Color(0xFFF0525F);
     final scheme = ColorScheme(
       brightness: b,
       primary: primary,
       onPrimary: Colors.white,
-      secondary: secondary,
-      onSecondary: Colors.white,
+      primaryContainer: _mix(primary, bg, 0.6),
+      onPrimaryContainer: fg,
+      secondary: accent,
+      onSecondary: Colors.black,
+      secondaryContainer: _mix(primary, surf, 0.7),
+      onSecondaryContainer: fg,
       tertiary: accent,
-      error: const Color(0xFFC62F2F),
+      onTertiary: Colors.black,
+      error: danger,
       onError: Colors.white,
-      surface: dark ? darkSurface : surface,
-      onSurface: dark ? darkText : text,
+      surface: surf,
+      onSurface: fg,
+      onSurfaceVariant: muted,
+      outline: border,
+      outlineVariant: border,
+      surfaceContainerLowest: bg,
+      surfaceContainerLow: surf,
+      surfaceContainer: surf,
+      surfaceContainerHigh: surf2,
+      surfaceContainerHighest: surf3,
     );
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(_radius));
+    final inputRadius = BorderRadius.circular(10);
     return ThemeData(
       colorScheme: scheme,
-      scaffoldBackgroundColor: dark ? darkBackground : background,
+      scaffoldBackgroundColor: bg,
       useMaterial3: true,
-      appBarTheme: AppBarTheme(backgroundColor: secondary, foregroundColor: Colors.white),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_radius))),
+      appBarTheme: AppBarTheme(
+        backgroundColor: surf, foregroundColor: fg, surfaceTintColor: Colors.transparent, elevation: 0,
+        shape: Border(bottom: BorderSide(color: border)),
       ),
+      cardTheme: CardThemeData(color: surf, surfaceTintColor: Colors.transparent, elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: border))),
+      navigationBarTheme: NavigationBarThemeData(backgroundColor: surf, indicatorColor: _mix(primary, surf, 0.55), surfaceTintColor: Colors.transparent),
+      dialogTheme: DialogThemeData(backgroundColor: surf, surfaceTintColor: Colors.transparent),
+      bottomSheetTheme: BottomSheetThemeData(backgroundColor: surf, surfaceTintColor: Colors.transparent),
+      dividerTheme: DividerThemeData(color: border),
+      listTileTheme: ListTileThemeData(iconColor: muted),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: surf2,
+        labelStyle: TextStyle(color: muted),
+        border: OutlineInputBorder(borderRadius: inputRadius, borderSide: BorderSide(color: border)),
+        enabledBorder: OutlineInputBorder(borderRadius: inputRadius, borderSide: BorderSide(color: border)),
+        focusedBorder: OutlineInputBorder(borderRadius: inputRadius, borderSide: BorderSide(color: primary, width: 1.6)),
+      ),
+      filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(backgroundColor: primary, foregroundColor: Colors.white, shape: shape, minimumSize: const Size(0, 48))),
+      outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: border), shape: shape, minimumSize: const Size(0, 46))),
+      textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: dark ? _mix(primary, Colors.white, 0.35) : primary)),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(backgroundColor: primary, foregroundColor: Colors.white),
+      snackBarTheme: SnackBarThemeData(backgroundColor: surf3, contentTextStyle: TextStyle(color: fg), behavior: SnackBarBehavior.floating),
     );
   }
 }

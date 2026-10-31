@@ -714,7 +714,23 @@ public sealed class StockViewModel : OwnerPage
         };
         f.Fields.Add(new FormField("name", "Nome do produto", row?.Name ?? "", Icons.Box));
         f.Fields.Add(new FormField("sku", "Código interno (SKU)", row?.Sku ?? "", Icons.Edit));
-        f.Fields.Add(new FormField("barcode", "Código de barras", row?.Barcode ?? "", Icons.Chart, "opcional"));
+        // Produto sem código do fabricante: o servidor gera um EAN-13 interno que nunca se repete na empresa.
+        FormField? barcodeField = null;
+        barcodeField = new FormField("barcode", "Código de barras", row?.Barcode ?? "", Icons.Chart, "leia com o leitor ou gere um")
+        {
+            ActionText = "Gerar código",
+            ActionCommand = new RelayCommand(async _ =>
+            {
+                try
+                {
+                    barcodeField!.Value = (await S.Api.PostAsync("/api/v1/products/barcode/generate", new { })).GetProperty("barcode").GetString()!;
+                    barcodeField.Note = "Código gerado pelo sistema (único). Imprima a etiqueta no botão Etiquetas do Estoque.";
+                }
+                catch (ApiException) { barcodeField!.Note = "Não foi possível gerar agora. Tente de novo."; }
+                catch (HttpRequestException) { barcodeField!.Note = "Sem conexão com o servidor."; }
+            }),
+        };
+        f.Fields.Add(barcodeField);
         // Quanto o dono pagou + % de lucro = preço de venda calculado (ex.: R$ 10,00 + 100% = R$ 20,00).
         var costField = new FormField("cost", "Quanto você pagou pelo produto (custo R$)", row is null ? "" : (row.CostCents / 100m).ToString("0.00", AppServices.PtBr), Icons.Money, "ex.: 10,00");
         var markupField = new FormField("markup", "% de lucro em cima do custo", row?.MarkupPercent is { } mk ? mk.ToString("0.##", AppServices.PtBr) : "", Icons.Chart, "ex.: 100 (deixe vazio para digitar o preço)");
@@ -776,9 +792,13 @@ public sealed class StockViewModel : OwnerPage
                 if (row is null) id = (await S.Api.PostAsync("/api/v1/products", body)).GetProperty("id").GetGuid();
                 else { await S.Api.PutAsync($"/api/v1/products/{row.ProductId}", body); id = row.ProductId; }
             }
-            catch (ApiException ex) when (ex.Code is "invalid_fiscal" or "sku_taken" or "invalid_unit")
+            catch (ApiException ex) when (ex.Code is "invalid_fiscal" or "sku_taken" or "invalid_unit" or "barcode_taken" or "invalid_barcode")
             {
-                form.Error = ex.Code switch { "sku_taken" => "Já existe produto com este código interno.", "invalid_fiscal" => "NCM deve ter 8 dígitos e CEST 7 dígitos.", _ => "Unidade inválida." };
+                form.Error = ex.Code switch
+                {
+                    "sku_taken" => "Já existe produto com este código interno.",
+                    "barcode_taken" => "Este código de barras já pertence a outro produto. Use outro ou clique em \"Gerar código\".",
+                    "invalid_barcode" => "Código de barras inválido.", "invalid_fiscal" => "NCM deve ter 8 dígitos e CEST 7 dígitos.", _ => "Unidade inválida." };
                 return false;
             }
             if (qty > 0)
