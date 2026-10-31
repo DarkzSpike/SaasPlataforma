@@ -4,6 +4,14 @@
              xmlns:local="clr-namespace:Comercial.Desktop">
     <DockPanel>
         <ContentControl DockPanel.Dock="Top" Style="{StaticResource PageHeader}"/>
+        <!-- Cobranças do dia: o sistema lembra e o WhatsApp da loja abre com a mensagem pronta (grátis) -->
+        <Border DockPanel.Dock="Top" Background="#1F25D366" BorderBrush="#25D366" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,12"
+                Visibility="{Binding HasDue, Converter={StaticResource Vis}}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE8BD;" Content="Cobrar agora" Command="{Binding DueCommand}" Margin="12,0,0,0"/>
+                <TextBlock Text="{Binding DueText}" Foreground="White" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
         <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="420"/>
@@ -52,7 +60,7 @@
                             </StackPanel>
                             <!-- Melhor dia para cobrar: todo mês o WhatsApp da loja manda o saldo e as compras do cliente -->
                             <Button Grid.Column="1" Command="{Binding BillingDayCommand}" Cursor="Hand" Margin="12,0,12,0" VerticalAlignment="Top"
-                                    Visibility="{Binding CanBilling, Converter={StaticResource Vis}}" ToolTip="Escolher o dia do mês da cobrança automática" AutomationProperties.Name="Dia de cobrança">
+                                    Visibility="{Binding CanBilling, Converter={StaticResource Vis}}" ToolTip="Escolher o dia do mês da cobrança" AutomationProperties.Name="Dia de cobrança">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Border x:Name="Bd" Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource DarkBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14,8" MinWidth="220">
@@ -73,7 +81,7 @@
                             </Button>
                             <!-- Cobrar agora pelo WhatsApp da loja -->
                             <Button Grid.Column="2" Width="54" Height="54" Cursor="Hand" VerticalAlignment="Top" Command="{Binding ChargeWhatsAppCommand}"
-                                    Visibility="{Binding CanBilling, Converter={StaticResource Vis}}" ToolTip="Mandar a cobrança do fiado pelo WhatsApp da loja" AutomationProperties.Name="Cobrar pelo WhatsApp">
+                                    Visibility="{Binding CanBilling, Converter={StaticResource Vis}}" ToolTip="Cobrar pelo WhatsApp da loja (grátis, mensagem pronta)" AutomationProperties.Name="Cobrar pelo WhatsApp">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">

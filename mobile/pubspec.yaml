@@ -2,7 +2,7 @@ name: comercial_app
 description: Aplicativo do proprietário (Android e iOS) — dashboard da plataforma de gestão comercial.
 publish_to: "none"
 # versionName+versionCode: o dev/build-apk.ps1 sobe o número a cada build (o app avisa quando há versão maior).
-version: 1.0.10+11
+version: 1.0.11+12
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -21,6 +21,8 @@ dependencies:
   package_info_plus: ^8.1.0
   mobile_scanner: ^7.0.1
   barcode_widget: ^2.0.4
+  flutter_local_notifications: ^22.3.3
+  timezone: ^0.11.2
 
 dev_dependencies:
   flutter_test:

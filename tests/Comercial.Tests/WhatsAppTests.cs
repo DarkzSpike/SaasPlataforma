@@ -189,6 +189,72 @@ public class WhatsAppTests(WhatsAppFactory f) : IClassFixture<WhatsAppFactory>
         Assert.Equal("cancelled", summary.GetProperty("campaigns")[0].GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task Modo_gratis_cobra_pelo_WhatsApp_da_loja_e_avisa_o_dono_no_dia()
+    {
+        var (t, cash) = await Store();   // sem conectar a API oficial
+        var p = await api.CreateProduct(t.OwnerToken, "PAO", price: 1250);
+        await api.StockEntry(t.OwnerToken, t.StoreId, p, 20);
+        var maria = await Customer(t, "Maria Silva", "(47) 99284-1812", consent: false, limit: 20000);
+        await Api.Expect(await api.Post("/api/v1/sales", t.OwnerToken, Api.Sale(t.StoreId, cash, p, qty: 2) with { Payments = [new SalePaymentRequest(5, 2500)], CustomerId = maria }), HttpStatusCode.Created);
+
+        var free = await Api.Expect(await api.Get($"/api/v1/customers/{maria}/charge-free", t.OwnerToken), HttpStatusCode.OK);
+        Assert.True(free.GetProperty("canSend").GetBoolean());
+        var text = free.GetProperty("text").GetString()!;
+        Assert.Contains("25,00", text);
+        Assert.Contains("x2", text);
+        Assert.Contains('\n', text);   // texto livre: pode ter uma compra por linha
+        Assert.StartsWith("https://wa.me/5547992841812?text=", free.GetProperty("link").GetString());
+
+        // Dia de cobrança hoje: aparece na lista, o dono é avisado uma vez e, depois de mandar, sai da lista.
+        var today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-3)).Day;
+        Assert.Equal(HttpStatusCode.NoContent, (await api.Put($"/api/v1/customers/{maria}/billing-day", t.OwnerToken, new { day = today })).StatusCode);
+        var due = await Api.Expect(await api.Get("/api/v1/customers/charges-due", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(maria, due.GetProperty("due")[0].GetProperty("id").GetGuid());
+        Assert.Equal(2500, due.GetProperty("totalDueCents").GetInt64());
+        var sentBefore = f.Wa.Sent.Count;
+        await Job();
+        await Job();
+        Assert.Equal(sentBefore, f.Wa.Sent.Count);   // modo grátis: o sistema não envia nada sozinho
+        var notes = await Api.Expect(await api.Get("/api/v1/notifications", t.OwnerToken), HttpStatusCode.OK);
+        var charges = notes.EnumerateArray().Where(n => n.GetProperty("type").GetString() == "fiado.charges_due").ToList();
+        Assert.Single(charges);
+        Assert.Contains("Maria Silva", charges[0].GetProperty("body").GetString());
+        Assert.Equal(HttpStatusCode.NoContent, (await api.Post($"/api/v1/customers/{maria}/charge-free/sent", t.OwnerToken, new { })).StatusCode);
+        due = await Api.Expect(await api.Get("/api/v1/customers/charges-due", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(0, due.GetProperty("due").GetArrayLength());
+        var log = await Api.Expect(await api.Get("/api/v1/whatsapp/messages?kind=charge", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal("manual", log[0].GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Promocao_gratis_avisa_na_hora_e_monta_a_fila_so_com_quem_aceitou()
+    {
+        var (t, _) = await Store();   // sem API oficial
+        var a = await Customer(t, "Ana", "47 91111-1111", consent: true);
+        await Customer(t, "Bruno", "47 92222-2222", consent: false);
+        await Customer(t, "Carla", null, consent: true);
+        var camp = (await Api.Expect(await api.Post("/api/v1/whatsapp/campaigns", t.OwnerToken,
+            new { title = "Sábado", message = "Tudo com 10% de desconto neste sábado!", scheduledAt = DateTimeOffset.UtcNow, manual = true }), HttpStatusCode.OK)).GetProperty("id").GetGuid();
+        Assert.Equal("campaign_same_day", await Api.Code(await api.Post("/api/v1/whatsapp/campaigns", t.OwnerToken,
+            new { title = "Outra", message = "Mais uma promoção no mesmo dia!", scheduledAt = DateTimeOffset.UtcNow.AddMinutes(5), manual = true })));
+
+        await Job();
+        var notes = await Api.Expect(await api.Get("/api/v1/notifications", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Contains(notes.EnumerateArray(), n => n.GetProperty("type").GetString() == "whatsapp.campaign_due");
+
+        var q = await Api.Expect(await api.Get($"/api/v1/whatsapp/campaigns/{camp}/manual-queue", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(1, q.GetProperty("queue").GetArrayLength());   // só Ana: aceitou e tem celular
+        Assert.Contains("SAIR", Uri.UnescapeDataString(q.GetProperty("queue")[0].GetProperty("link").GetString()!));
+        Assert.Equal(HttpStatusCode.NoContent, (await api.Post($"/api/v1/whatsapp/campaigns/{camp}/manual-sent", t.OwnerToken, new { customerId = a })).StatusCode);
+        q = await Api.Expect(await api.Get($"/api/v1/whatsapp/campaigns/{camp}/manual-queue", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(0, q.GetProperty("queue").GetArrayLength());
+        Assert.Equal("done", q.GetProperty("status").GetString());
+        var summary = await Api.Expect(await api.Get("/api/v1/whatsapp/campaigns", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(1, summary.GetProperty("campaigns")[0].GetProperty("sent").GetInt32());
+        Assert.True(summary.GetProperty("campaigns")[0].GetProperty("manual").GetBoolean());
+    }
+
     [Theory]
     [InlineData("(47) 99284-1812", "5547992841812")]
     [InlineData("4733334444", "554733334444")]

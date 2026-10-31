@@ -245,12 +245,14 @@ public static class Snapshot
         // Cobrança do fiado pelo WhatsApp da loja: dia escolhido e botão verde.
         cus.CreditText = "Fiado: deve R$ 49,80 • limite R$ 300,00 • disponível R$ 250,20";
         cus.SetBillingForPreview(10, "10/10/2026");
+        cus.SetDueForPreview("Hoje tem 3 cobrança(s) do fiado para mandar (R$ 187,40): Maria Silva, João Souza, Ana Lima");
         Save(window, Path.Combine(dir, "14b-clientes-whatsapp.png"));
         shell.ShowPrompt(new PromptViewModel
         {
             Title = "Cobrar pelo WhatsApp: Maria Silva",
-            Message = "Olá, Maria! Aqui é da Loja Demo. Seu saldo no crediário é de R$ 49,80. Compras em aberto: 28/10: Caneca de cerâmica 300 ml x2 (R$ 49,80). Para pagar ou tirar dúvidas, responda esta mensagem.\n\nEnviar agora para o celular •••7777?",
-            ConfirmText = "Enviar cobrança",
+            Message = "Olá, Maria! Aqui é da Loja Demo.\nSeu saldo no crediário é de R$ 49,80.\n\nCompras em aberto:\n• 28/10: Caneca de cerâmica 300 ml x2 (R$ 49,80)\n\nPara pagar ou tirar dúvidas, é só responder esta mensagem."
+                + "\n\nO WhatsApp da loja vai abrir com essa mensagem pronta. Confira e aperte Enviar. (Grátis)",
+            ConfirmText = "Abrir no WhatsApp",
         }, _ => Task.FromResult(true));
         Save(window, Path.Combine(dir, "14c-cobranca-whatsapp.png"));
         shell.Prompt = null;

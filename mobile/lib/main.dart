@@ -6,6 +6,7 @@ import 'core/api_client.dart';
 import 'core/app_extras.dart';
 import 'core/branding.dart';
 import 'core/push.dart';
+import 'core/reminders.dart';
 import 'core/server_config.dart';
 import 'core/session.dart';
 import 'core/session_store.dart';
@@ -173,16 +174,39 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int index = 0;
   Me? me;
   String? storeId;
   String? error;
+  bool _openCustomers = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    Reminders.tapped.addListener(_onReminder);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    Reminders.tapped.removeListener(_onReminder);
+    super.dispose();
+  }
+
+  // Volta para o app: refaz a agenda de avisos (cobranças e promoções podem ter mudado no caixa).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && me != null) Reminders.refresh(widget.api, me!);
+  }
+
+  // Tocou no aviso de cobrança/promoção: abre a aba Clientes.
+  void _onReminder() {
+    if (Reminders.tapped.value == null) return;
+    Reminders.tapped.value = null;
+    setState(() => _openCustomers = true);
   }
 
   Future<void> _load() async {
@@ -194,6 +218,7 @@ class _HomeShellState extends State<HomeShell> {
         storeId = stores.isEmpty ? null : (stores.first as Map<String, dynamic>)['id'] as String;
         error = null;
       });
+      Reminders.refresh(widget.api, m);
     } on ApiException catch (e) {
       if (e.code == 'mobile_not_allowed') {
         await widget.onLogout(); // o dono desligou o acesso deste usuário ao app
@@ -240,6 +265,11 @@ class _HomeShellState extends State<HomeShell> {
         body: const Center(child: Padding(padding: EdgeInsets.all(24),
             child: Text('Seu usuário entrou, mas não tem nenhuma função liberada no app. Peça ao dono para liberar "Cadastrar e editar produtos".', textAlign: TextAlign.center))),
       );
+    }
+    if (_openCustomers) {
+      _openCustomers = false;
+      final c = tabs.indexWhere((t) => t.page is CustomersPage);
+      if (c >= 0) index = c;
     }
     final i = index.clamp(0, tabs.length - 1);
     return Scaffold(

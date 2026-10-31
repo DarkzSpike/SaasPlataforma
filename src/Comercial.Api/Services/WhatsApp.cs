@@ -20,7 +20,8 @@ public sealed record WhatsAppSettingsView(bool Connected, string? PhoneNumberId,
 public sealed record WhatsAppTestRequest(string Phone);
 public sealed record BillingDayRequest(int? Day);
 public sealed record ChargePreview(bool CanSend, string? Reason, string? Phone, long OpenCents, string Text, int? BillingDay, DateOnly? LastChargeSentOn);
-public sealed record CampaignRequest(string Title, string Message, DateTimeOffset ScheduledAt);
+public sealed record CampaignRequest(string Title, string Message, DateTimeOffset ScheduledAt, bool Manual = false);
+public sealed record ManualSentRequest(Guid CustomerId);
 
 public sealed record WaCheck(bool Ok, string Message, string? DisplayPhone, string? VerifiedName);
 public sealed record WaSendResult(bool Ok, string? MessageId, string? Error);
@@ -177,6 +178,9 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
             var token = r.AccessToken?.Trim();
             if (!string.IsNullOrEmpty(phoneId) && !Regex.IsMatch(phoneId, @"^\d{5,30}$"))
                 throw new DomainException("invalid_phone_number_id", "A identificação do número tem só números (copie do painel da Meta: WhatsApp > Configuração da API).");
+            // Erro comum: colar o próprio celular (10 a 13 dígitos). A identificação da Meta é um código maior, com 15 ou mais.
+            if (!string.IsNullOrEmpty(phoneId) && phoneId.Length < 14)
+                throw new DomainException("phone_instead_of_id", "Isso parece o número do celular. Use a \"Identificação do número de telefone\" (código com 15 ou mais dígitos) que aparece no painel da Meta, em WhatsApp > Configuração da API.");
             if (!string.IsNullOrEmpty(token) && (token.Length is < 20 or > 1000 || token.Any(char.IsWhiteSpace)))
                 throw new DomainException("invalid_token", "Token de acesso da Meta inválido.");
             if (!string.IsNullOrEmpty(phoneId) || !string.IsNullOrEmpty(token))
@@ -280,7 +284,7 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
         await db.SaveChangesAsync();
     }
 
-    private sealed record ChargeData(long OpenCents, string Items, string Text, string[] Params);
+    private sealed record ChargeData(long OpenCents, string Items, string Text, string[] Params, List<string> Days, string Store, string First);
 
     /// <summary>Saldo do fiado e o que foi comprado em cada dia (das contas ainda em aberto).</summary>
     private async Task<ChargeData> BuildChargeAsync(Customer c, TenantWhatsAppSettings? s)
@@ -304,7 +308,7 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
         var first = Param(c.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? c.Name, 40);
         string[] ps = [first, Param(tenant.TradeName, 60), Money(open), itemsText];
         var text = ChargeTemplateText.Replace("{{1}}", ps[0]).Replace("{{2}}", ps[1]).Replace("{{3}}", ps[2]).Replace("{{4}}", ps[3]);
-        return new(open, itemsText, text, ps);
+        return new(open, itemsText, text, ps, parts, Param(tenant.TradeName, 60), first);
     }
 
     public async Task<ChargePreview> ChargePreviewAsync(Guid customerId)
@@ -339,6 +343,91 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
         await db.SaveChangesAsync(ct);
         if (!automatic && !res.Ok) throw new DomainException("whatsapp_send_failed", res.Error ?? "Falha no envio.", 502);
         return m;
+    }
+
+    // ---------------- Modo grátis: mensagem pronta aberta no WhatsApp da loja ----------------
+
+    /// <summary>Link que abre o WhatsApp (celular ou computador) na conversa com o cliente e o texto já escrito.</summary>
+    public static string WaLink(string phone, string text) => $"https://wa.me/{phone}?text={Uri.EscapeDataString(text)}";
+
+    /// <summary>Cobrança do fiado para o dono mandar pelo WhatsApp da loja (sem custo): texto livre, com o que foi comprado em cada dia.</summary>
+    public async Task<object> FreeChargeAsync(Guid customerId)
+    {
+        var c = await lookup.GetAsync<Customer>(customerId);
+        var d = await BuildChargeAsync(c, null);
+        var phone = NormalizePhone(c.Phone);
+        var text = $"Olá, {d.First}! Aqui é da {d.Store}.\nSeu saldo no crediário é de {Money(d.OpenCents)}."
+            + (d.Days.Count == 0 ? "" : "\n\nCompras em aberto:\n" + string.Join("\n", d.Days.Select(x => "• " + x)))
+            + "\n\nPara pagar ou tirar dúvidas, é só responder esta mensagem.";
+        var reason = phone is null ? "O cliente não tem celular válido no cadastro." : d.OpenCents <= 0 ? "O cliente não deve nada no crediário." : null;
+        return new { canSend = reason is null, reason, phone, openCents = d.OpenCents, text, link = phone is null ? null : WaLink(phone, text) };
+    }
+
+    /// <summary>O dono abriu a cobrança no WhatsApp: registra (sai da lista do dia) e conta como a cobrança do mês.</summary>
+    public async Task MarkFreeChargeAsync(Guid customerId)
+    {
+        var c = await lookup.GetAsync<Customer>(customerId);
+        var d = await BuildChargeAsync(c, null);
+        db.WhatsAppMessages.Add(new WhatsAppMessage
+        {
+            TenantId = actor.TenantId, CustomerId = c.Id, Kind = WhatsAppKinds.Charge, Phone = NormalizePhone(c.Phone) ?? "", Status = WhatsAppKinds.ManualStatus,
+            Preview = Param(d.Text, 2000), AmountCents = d.OpenCents, CreatedAt = Now,
+        });
+        c.LastChargeSentOn = DateOnly.FromDateTime(Local(Now).Date);
+        audit.Add("whatsapp.charge_manual", actor.TenantId, nameof(Customer), c.Id, new { amount = d.OpenCents });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Dia de cobrança que cai no mês (dia 31 vira o último dia nos meses mais curtos).</summary>
+    private static DateTime BillingDate(int billingDay, int year, int month) => new(year, month, Math.Min(billingDay, DateTime.DaysInMonth(year, month)));
+
+    /// <summary>
+    /// Cobranças do fiado: as de hoje que ainda não foram mandadas (inclui as atrasadas do mês) e a agenda dos próximos
+    /// dias, para o app avisar o dono às 9h de cada dia de cobrança.
+    /// </summary>
+    public async Task<object> ChargesDueAsync()
+    {
+        var today = Local(Now).Date;
+        var monthStart = new DateOnly(today.Year, today.Month, 1);
+        var list = await db.Customers.AsNoTracking().Where(c => c.IsActive && c.AnonymizedAt == null && c.BillingDay != null)
+            .Select(c => new { c.Id, c.Name, c.Phone, c.BillingDay, c.LastChargeSentOn }).ToListAsync();
+        var balances = new Dictionary<Guid, long>();
+        foreach (var c in list) balances[c.Id] = await credit.OpenBalanceAsync(c.Id);
+        var owing = list.Where(c => balances[c.Id] > 0).ToList();
+        var due = owing.Where(c => BillingDate(c.BillingDay!.Value, today.Year, today.Month) <= today && (c.LastChargeSentOn == null || c.LastChargeSentOn < monthStart))
+            .OrderBy(c => c.Name).Select(c => new { c.Id, c.Name, openCents = balances[c.Id], c.BillingDay, hasPhone = NormalizePhone(c.Phone) is not null }).ToList();
+        var upcoming = Enumerable.Range(1, 31).Select(i => today.AddDays(i))
+            .Select(day => new { date = DateOnly.FromDateTime(day), names = owing.Where(c => BillingDate(c.BillingDay!.Value, day.Year, day.Month) == day).Select(c => c.Name).OrderBy(n => n).ToList() })
+            .Where(x => x.names.Count > 0).ToList();
+        var auto = (await FindAsync()) is { ChargesEnabled: true, PhoneNumberId: not null, AccessTokenProtected: not null };
+        return new { today = DateOnly.FromDateTime(today), automatic = auto, due, totalDueCents = due.Sum(x => x.openCents), upcoming };
+    }
+
+    /// <summary>Aviso do dia (aba Avisos e push) quando há cobranças para mandar à mão. No máximo um por dia.</summary>
+    public async Task<bool> NotifyDueChargesAsync(NotificationService notifications, CancellationToken ct)
+    {
+        var s = await FindAsync();
+        if (s is { ChargesEnabled: true, PhoneNumberId: not null, AccessTokenProtected: not null } || !InSendingHours(Now)) return false;
+        var local = Local(Now);
+        var start = new DateTimeOffset(local.Date, local.Offset);
+        if (await db.Notifications.AnyAsync(n => n.Type == "fiado.charges_due" && n.CreatedAt >= start, ct)) return false;
+        var today = local.Date;
+        var monthStart = new DateOnly(today.Year, today.Month, 1);
+        var list = await db.Customers.AsNoTracking().Where(c => c.IsActive && c.AnonymizedAt == null && c.BillingDay != null
+                && (c.LastChargeSentOn == null || c.LastChargeSentOn < monthStart)).Select(c => new { c.Id, c.Name, c.BillingDay }).ToListAsync(ct);
+        var names = new List<string>();
+        long total = 0;
+        foreach (var c in list.Where(c => BillingDate(c.BillingDay!.Value, today.Year, today.Month) == today).OrderBy(c => c.Name))
+        {
+            var open = await credit.OpenBalanceAsync(c.Id);
+            if (open <= 0) continue;
+            names.Add(c.Name); total += open;
+        }
+        if (names.Count == 0) return false;
+        var who = names.Count <= 3 ? string.Join(", ", names) : $"{string.Join(", ", names.Take(3))} e mais {names.Count - 3}";
+        await notifications.CreateAsync(actor.TenantId, "fiado.charges_due", "Cobranças do fiado para hoje",
+            $"{who} ({Money(total)}). Abra Clientes e toque em Cobrar: a mensagem já vai pronta no WhatsApp da loja.", new { count = names.Count, total }, ct);
+        return true;
     }
 
     private static bool IsBillingDay(int billingDay, DateTime today) =>
@@ -378,39 +467,47 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
 
     // ---------------- Campanhas de promoção ----------------
 
-    private IQueryable<Customer> PromoAudience(TenantWhatsAppSettings s)
+    private IQueryable<Customer> PromoAudience(int intervalDays)
     {
-        var cutoff = Now.AddDays(-s.PromoIntervalDays);
+        var cutoff = Now.AddDays(-intervalDays);
         return db.Customers.Where(c => c.IsActive && c.AnonymizedAt == null && c.MarketingConsent && c.Phone != null
             && (c.LastPromoSentAt == null || c.LastPromoSentAt <= cutoff));
     }
 
-    private async Task<int> SentTodayAsync(string kind)
+    private async Task<int> SentTodayAsync(string kind, bool manual = false)
     {
         var local = Local(Now);
         var start = new DateTimeOffset(local.Date, local.Offset);
-        return await db.WhatsAppMessages.CountAsync(m => m.Kind == kind && m.CreatedAt >= start);
+        return await db.WhatsAppMessages.CountAsync(m => m.Kind == kind && m.CreatedAt >= start && (m.Status == WhatsAppKinds.ManualStatus) == manual);
     }
+
+    /// <summary>
+    /// Teto do modo grátis: pelo WhatsApp comum, muitas mensagens iguais para quem não salvou o número da loja geram
+    /// denúncias e bloqueio. Por isso no máximo 50 por dia, mesmo que o limite da API seja maior.
+    /// </summary>
+    public const int ManualPromoCap = 50;
+    private static int ManualDailyLimit(TenantWhatsAppSettings? s) => Math.Min(ManualPromoCap, s?.DailyPromoLimit ?? ManualPromoCap);
 
     public async Task<object> CampaignsAsync()
     {
         var s = await FindAsync();
         var list = await db.WhatsAppCampaigns.AsNoTracking().OrderByDescending(c => c.ScheduledAt).Take(50).ToListAsync();
-        var eligible = s is null ? 0 : (await PromoAudience(s).Select(c => c.Phone).ToListAsync()).Count(p => NormalizePhone(p) is not null);
+        var eligible = (await PromoAudience(s?.PromoIntervalDays ?? 7).Select(c => c.Phone).ToListAsync()).Count(p => NormalizePhone(p) is not null);
         var consenting = await db.Customers.CountAsync(c => c.IsActive && c.AnonymizedAt == null && c.MarketingConsent);
         return new
         {
             connected = s is { PhoneNumberId: not null, AccessTokenProtected: not null }, promotionsEnabled = s?.PromotionsEnabled ?? false,
             dailyLimit = s?.DailyPromoLimit ?? 200, intervalDays = s?.PromoIntervalDays ?? 7, sentToday = await SentTodayAsync(WhatsAppKinds.Promo),
             eligibleNow = eligible, consenting, sendFromHour = FromHour, sendUntilHour = UntilHour,
-            campaigns = list.Select(c => new { c.Id, c.Title, c.Message, c.ScheduledAt, c.Status, c.Sent, c.Failed, c.StopReason, c.FinishedAt }),
+            manualDailyLimit = ManualDailyLimit(s), sentTodayManual = await SentTodayAsync(WhatsAppKinds.Promo, manual: true),
+            campaigns = list.Select(c => new { c.Id, c.Title, c.Message, c.ScheduledAt, c.Status, c.Sent, c.Failed, c.StopReason, c.FinishedAt, c.Manual }),
         };
     }
 
     public async Task<object> CreateCampaignAsync(CampaignRequest r)
     {
         var s = await FindAsync();
-        if (s is not { PromotionsEnabled: true, PhoneNumberId: not null, AccessTokenProtected: not null })
+        if (!r.Manual && s is not { PromotionsEnabled: true, PhoneNumberId: not null, AccessTokenProtected: not null })
             throw new DomainException("promotions_disabled", "Ligue as promoções na engrenagem (Configurações > WhatsApp) antes de criar uma campanha.", 409);
         var title = Param(r.Title ?? "", 100);
         var message = Param(r.Message ?? "", 500);
@@ -425,9 +522,9 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
         if (active.Any(a => Local(a).Date == day)) throw new DomainException("campaign_same_day", "Já existe uma campanha neste dia. Para não virar spam, é uma por dia.", 409);
         if (active.Count(a => Math.Abs((Local(a).Date - day).TotalDays) < 7) >= 3)
             throw new DomainException("campaign_week_limit", "Limite de 3 campanhas a cada 7 dias. Escolha outra data.", 409);
-        var c = new WhatsAppCampaign { TenantId = actor.TenantId, Title = title, Message = message, ScheduledAt = r.ScheduledAt, CreatedByUserId = actor.UserId ?? Guid.Empty, CreatedAt = Now };
+        var c = new WhatsAppCampaign { TenantId = actor.TenantId, Title = title, Message = message, ScheduledAt = r.ScheduledAt, Manual = r.Manual, CreatedByUserId = actor.UserId ?? Guid.Empty, CreatedAt = Now };
         db.WhatsAppCampaigns.Add(c);
-        audit.Add("whatsapp.campaign_created", actor.TenantId, nameof(WhatsAppCampaign), c.Id, new { title, r.ScheduledAt });
+        audit.Add("whatsapp.campaign_created", actor.TenantId, nameof(WhatsAppCampaign), c.Id, new { title, r.ScheduledAt, r.Manual });
         await db.SaveChangesAsync();
         return new { c.Id, c.Status };
     }
@@ -441,6 +538,79 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
         await db.SaveChangesAsync();
     }
 
+    private static string PromoText(string first, string store, string message) =>
+        $"Olá, {first}! Novidade da {store}: {message}\n\nSe não quiser mais receber ofertas, é só responder SAIR.";
+
+    /// <summary>
+    /// Campanha grátis: quem ainda falta receber hoje, cada um com o link do WhatsApp já com a mensagem.
+    /// Respeita consentimento, intervalo entre promoções e o teto diário do modo grátis.
+    /// </summary>
+    public async Task<object> ManualQueueAsync(Guid id)
+    {
+        var camp = await db.WhatsAppCampaigns.FirstOrDefaultAsync(x => x.Id == id && x.Manual) ?? throw new DomainException("not_found", "Campanha não encontrada.", 404);
+        var s = await FindAsync();
+        var limit = ManualDailyLimit(s);
+        var sentToday = await SentTodayAsync(WhatsAppKinds.Promo, manual: true);
+        if (camp.Status is CampaignStatus.Cancelled or CampaignStatus.Done || camp.ScheduledAt > Now)
+            return new { camp.Id, camp.Title, camp.Status, camp.Sent, dailyLimit = limit, sentToday, remaining = 0, queue = Array.Empty<object>() };
+        var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == actor.TenantId);
+        var already = db.WhatsAppMessages.Where(m => m.CampaignId == camp.Id && m.CustomerId != null).Select(m => m.CustomerId!.Value);
+        var audience = (await PromoAudience(s?.PromoIntervalDays ?? 7).Where(c => !already.Contains(c.Id)).OrderBy(c => c.Name).ToListAsync())
+            .Where(c => NormalizePhone(c.Phone) is not null).ToList();
+        if (audience.Count == 0)
+        {
+            camp.Status = CampaignStatus.Done; camp.FinishedAt = Now;
+            await db.SaveChangesAsync();
+        }
+        var store = Param(tenant.TradeName, 60);
+        var queue = audience.Take(Math.Max(0, limit - sentToday)).Select(c =>
+        {
+            var first = Param(c.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? c.Name, 40);
+            return (object)new { customerId = c.Id, name = c.Name, link = WaLink(NormalizePhone(c.Phone)!, PromoText(first, store, camp.Message)) };
+        }).ToList();
+        return new { camp.Id, camp.Title, camp.Status, camp.Sent, dailyLimit = limit, sentToday, remaining = audience.Count, queue };
+    }
+
+    /// <summary>O dono abriu a promoção no WhatsApp para este cliente: conta no limite do dia e no intervalo dele.</summary>
+    public async Task MarkManualSentAsync(Guid id, Guid customerId)
+    {
+        var camp = await db.WhatsAppCampaigns.FirstOrDefaultAsync(x => x.Id == id && x.Manual) ?? throw new DomainException("not_found", "Campanha não encontrada.", 404);
+        if (camp.Status is CampaignStatus.Cancelled) throw new DomainException("campaign_cancelled", "Esta campanha foi cancelada.", 409);
+        var c = await lookup.GetAsync<Customer>(customerId);
+        if (!c.MarketingConsent) throw new DomainException("no_consent", "Este cliente não aceitou receber ofertas.", 409);
+        if (await db.WhatsAppMessages.AnyAsync(m => m.CampaignId == id && m.CustomerId == customerId)) return;
+        var s = await FindAsync();
+        if (await SentTodayAsync(WhatsAppKinds.Promo, manual: true) >= ManualDailyLimit(s))
+            throw new DomainException("daily_limit", "Limite de promoções de hoje atingido. Continue amanhã para o número não ser bloqueado.", 409);
+        var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == actor.TenantId);
+        var first = Param(c.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? c.Name, 40);
+        db.WhatsAppMessages.Add(new WhatsAppMessage
+        {
+            TenantId = actor.TenantId, CustomerId = c.Id, CampaignId = id, Kind = WhatsAppKinds.Promo, Phone = NormalizePhone(c.Phone) ?? "",
+            Status = WhatsAppKinds.ManualStatus, Preview = Param(PromoText(first, Param(tenant.TradeName, 60), camp.Message), 2000), CreatedAt = Now,
+        });
+        camp.Sent++;
+        if (camp.Status == CampaignStatus.Scheduled) camp.Status = CampaignStatus.Sending;
+        c.LastPromoSentAt = Now;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Aviso (aba Avisos e push) quando chega a hora de uma campanha grátis. Um por campanha.</summary>
+    public async Task<int> NotifyManualCampaignsAsync(NotificationService notifications, CancellationToken ct)
+    {
+        if (!InSendingHours(Now)) return 0;
+        var now = Now;
+        var due = await db.WhatsAppCampaigns.Where(c => c.Manual && c.Status == CampaignStatus.Scheduled && c.ScheduledAt <= now).ToListAsync(ct);
+        foreach (var c in due)
+        {
+            c.Status = CampaignStatus.Sending;
+            await db.SaveChangesAsync(ct);
+            await notifications.CreateAsync(actor.TenantId, "whatsapp.campaign_due", "Hora de mandar a promoção",
+                $"\"{c.Title}\": abra Promoções e toque em Mandar. A mensagem já vai pronta no WhatsApp da loja.", new { campaignId = c.Id }, ct);
+        }
+        return due.Count;
+    }
+
     /// <summary>Envia as campanhas que já chegaram na hora, aos poucos, respeitando o teto diário.</summary>
     public async Task<int> RunDueCampaignsAsync(CancellationToken ct)
     {
@@ -449,7 +619,7 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
         var token = Protector.Unprotect(p);
         var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == actor.TenantId, ct);
         var now = Now;
-        var due = await db.WhatsAppCampaigns.Where(c => (c.Status == CampaignStatus.Scheduled || c.Status == CampaignStatus.Sending) && c.ScheduledAt <= now)
+        var due = await db.WhatsAppCampaigns.Where(c => !c.Manual && (c.Status == CampaignStatus.Scheduled || c.Status == CampaignStatus.Sending) && c.ScheduledAt <= now)
             .OrderBy(c => c.ScheduledAt).ToListAsync(ct);
         var total = 0;
         foreach (var camp in due)
@@ -458,7 +628,7 @@ public sealed class WhatsAppService(AppDbContext db, RequestActor actor, AuditSe
             var room = s.DailyPromoLimit - await SentTodayAsync(WhatsAppKinds.Promo);
             if (room <= 0) { await db.SaveChangesAsync(ct); break; } // continua amanhã
             var already = db.WhatsAppMessages.Where(m => m.CampaignId == camp.Id && m.CustomerId != null).Select(m => m.CustomerId!.Value);
-            var audience = (await PromoAudience(s).Where(c => !already.Contains(c.Id)).OrderBy(c => c.Id).ToListAsync(ct))
+            var audience = (await PromoAudience(s.PromoIntervalDays).Where(c => !already.Contains(c.Id)).OrderBy(c => c.Id).ToListAsync(ct))
                 .Where(c => NormalizePhone(c.Phone) is not null).ToList();
             if (audience.Count == 0) { camp.Status = CampaignStatus.Done; camp.FinishedAt = Now; await db.SaveChangesAsync(ct); continue; }
             foreach (var c in audience.Take(room))
@@ -547,8 +717,14 @@ public sealed class WhatsAppJob(IServiceProvider sp, IConfiguration config, ILog
         using (var scope = root.CreateScope())
         {
             scope.ServiceProvider.GetRequiredService<TenantContext>().SetPlatformScope();
-            tenants = await scope.ServiceProvider.GetRequiredService<AppDbContext>().WhatsAppSettings.IgnoreQueryFilters()
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            tenants = await db.WhatsAppSettings.IgnoreQueryFilters()
                 .Where(s => s.PhoneNumberId != null && (s.ChargesEnabled || s.PromotionsEnabled)).Select(s => s.TenantId).ToListAsync(ct);
+            // Modo grátis: lojas com dia de cobrança ou campanha grátis recebem o aviso para mandar à mão.
+            tenants = tenants
+                .Concat(await db.Customers.IgnoreQueryFilters().Where(c => c.BillingDay != null && c.IsActive).Select(c => c.TenantId).Distinct().ToListAsync(ct))
+                .Concat(await db.WhatsAppCampaigns.IgnoreQueryFilters().Where(c => c.Manual && c.Status == CampaignStatus.Scheduled).Select(c => c.TenantId).Distinct().ToListAsync(ct))
+                .Distinct().ToList();
         }
         var result = new Dictionary<Guid, (int, int)>();
         foreach (var t in tenants)
@@ -558,7 +734,13 @@ public sealed class WhatsAppJob(IServiceProvider sp, IConfiguration config, ILog
             var actor = scope.ServiceProvider.GetRequiredService<RequestActor>();
             actor.TenantId = t; actor.Type = ActorType.System;
             var svc = scope.ServiceProvider.GetRequiredService<WhatsAppService>();
-            try { result[t] = (await svc.RunDueChargesAsync(ct), await svc.RunDueCampaignsAsync(ct)); }
+            try
+            {
+                result[t] = (await svc.RunDueChargesAsync(ct), await svc.RunDueCampaignsAsync(ct));
+                var notifications = scope.ServiceProvider.GetRequiredService<NotificationService>();
+                await svc.NotifyDueChargesAsync(notifications, ct);
+                await svc.NotifyManualCampaignsAsync(notifications, ct);
+            }
             catch (DomainException ex) { scope.ServiceProvider.GetRequiredService<ILogger<WhatsAppJob>>().LogWarning("WhatsApp ({Tenant}): {Error}", t, ex.Message); }
         }
         return result;

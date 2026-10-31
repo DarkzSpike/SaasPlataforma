@@ -36,6 +36,10 @@ class Me {
   bool get seesFinance => modules.contains('financeiro') && can('finance.read');
   /// Clientes e fiado: quem deve, quanto e o limite (módulo de contas a receber + ver clientes).
   bool get seesCustomers => modules.contains('contas') && can('customers.read');
+  /// Cobrar o fiado pelo WhatsApp da loja (grátis, mensagem pronta) e receber o aviso do dia de cobrança.
+  bool get chargesByWhatsApp => modules.contains('contas') && can('finance.read');
+  /// Promoções grátis pelo WhatsApp da loja (módulo de campanhas + permissão de mensagens).
+  bool get sendsPromos => modules.contains('campanhas') && can('messaging.manage');
   bool get seesProfit => can('reports.financial');
   /// Ver e pagar as faturas do sistema (mensalidade).
   bool get paysInvoices => can('billing.manage');

@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
+using System.Windows;
 using Comercial.Desktop.Core;
 using Comercial.Shared.Contracts;
 
@@ -316,7 +318,7 @@ public sealed class CustomersViewModel : OwnerPage
     public RelayCommand BillingDayCommand => RelayCommand.Sync(_ => Shell.ShowPrompt(new PromptViewModel
     {
         Title = "Dia de cobrança: " + Selected!.Name,
-        Message = "Todo mês, nesse dia, o WhatsApp da loja manda para o cliente quanto ele deve e o que comprou em cada dia. Deixe vazio para não cobrar automaticamente.",
+        Message = "Todo mês, nesse dia, o sistema avisa você (no app e no caixa) para cobrar o cliente: o WhatsApp da loja abre com quanto ele deve e o que comprou em cada dia, é só enviar. Com a API oficial ligada, o envio é automático. Deixe vazio para não cobrar.",
         ValueLabel = "Dia do mês (1 a 31)", Value = _billingDay?.ToString() ?? "", ConfirmText = "Salvar dia",
     }, async p =>
     {
@@ -332,34 +334,80 @@ public sealed class CustomersViewModel : OwnerPage
         return false;
     }), _ => Selected is not null && S.Session.Can("finance.manage", "contas"));
 
-    /// <summary>Botão verde: mostra a mensagem com o saldo e as compras por dia e envia pelo WhatsApp da loja.</summary>
-    public RelayCommand ChargeWhatsAppCommand => new(async _ =>
+    /// <summary>
+    /// Botão verde (grátis): monta a mensagem com o saldo e as compras de cada dia e abre o WhatsApp da loja
+    /// (WhatsApp Web ou do computador) na conversa do cliente, com o texto pronto. É só apertar Enviar.
+    /// </summary>
+    public RelayCommand ChargeWhatsAppCommand => RelayCommand.Sync(_ => ChargeFree(Selected!.Id, Selected!.Name), _ => Selected is not null && CanBilling);
+
+    private void ChargeFree(Guid id, string name, Action? then = null) => _ = ChargeFreeAsync(id, name, then);
+
+    private async Task ChargeFreeAsync(Guid id, string name, Action? then)
     {
-        var c = Selected!;
         try
         {
-            var pv = await S.Api.GetAsync($"/api/v1/customers/{c.Id}/charge-preview");
+            var pv = await S.Api.GetAsync($"/api/v1/customers/{id}/charge-free");
             if (!pv.GetProperty("canSend").GetBoolean())
             {
-                Shell.ShowPrompt(new PromptViewModel { Title = "Cobrar pelo WhatsApp", Message = pv.GetProperty("reason").GetString()!, ConfirmText = "Entendi" }, _ => Task.FromResult(true));
+                Shell.ShowPrompt(new PromptViewModel { Title = "Cobrar pelo WhatsApp: " + name, Message = pv.GetProperty("reason").GetString()!, ConfirmText = "Entendi" }, _ => Task.FromResult(true));
                 return;
             }
+            var link = pv.GetProperty("link").GetString()!;
             Shell.ShowPrompt(new PromptViewModel
             {
-                Title = "Cobrar pelo WhatsApp: " + c.Name,
-                Message = pv.GetProperty("text").GetString() + $"\n\nEnviar agora para o celular {pv.GetProperty("phone").GetString()}?",
-                ConfirmText = "Enviar cobrança",
+                Title = "Cobrar pelo WhatsApp: " + name,
+                Message = pv.GetProperty("text").GetString() + "\n\nO WhatsApp da loja vai abrir com essa mensagem pronta. Confira e aperte Enviar. (Grátis)",
+                ConfirmText = "Abrir no WhatsApp",
             }, async p =>
             {
-                try { await S.Api.PostAsync($"/api/v1/customers/{c.Id}/charge", new { }); await LoadDetailAsync(c); return true; }
-                catch (ApiException ex) { p.Error = ex.Code is "charge_too_soon" or "whatsapp_send_failed" or "nothing_to_charge" or "invalid_phone" or "whatsapp_not_connected" ? ex.Message : "Falha: " + ex.Code; }
-                catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; }
-                return false;
+                try { Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); }
+                catch (Exception) { p.Error = "Não consegui abrir o WhatsApp neste computador."; return false; }
+                try { await S.Api.PostAsync($"/api/v1/customers/{id}/charge-free/sent", new { }); }
+                catch (ApiException) { /* a mensagem já abriu; só não ficou registrada */ }
+                catch (HttpRequestException) { }
+                if (Selected?.Id == id) await LoadDetailAsync(Selected);
+                await LoadDueAsync();
+                if (then is not null) _ = Application.Current.Dispatcher.BeginInvoke(then);
+                return true;
             });
         }
-        catch (ApiException ex) { DetailInfo = "Não foi possível preparar a cobrança: " + ex.Code; }
+        catch (ApiException ex) { DetailInfo = ex.Status == 403 ? "Só quem vê o financeiro pode cobrar." : "Não foi possível preparar a cobrança: " + ex.Code; }
         catch (HttpRequestException) { DetailInfo = "Sem conexão com o servidor."; }
-    }, _ => Selected is not null && S.Session.Can("finance.manage", "contas"));
+    }
+
+    // ---------- Cobranças do dia (o sistema avisa; o dono manda pelo WhatsApp da loja) ----------
+    private string _due = "";
+    private List<(Guid Id, string Name)> _dueList = [];
+    public string DueText { get => _due; set { if (Set(ref _due, value)) Raise(nameof(HasDue)); } }
+    public bool HasDue => DueText.Length > 0;
+    /// <summary>Abre as cobranças de hoje uma depois da outra.</summary>
+    public RelayCommand DueCommand => RelayCommand.Sync(_ => NextDue(), _ => HasDue);
+
+    private void NextDue()
+    {
+        if (_dueList.Count == 0) return;
+        var (id, name) = _dueList[0];
+        ChargeFree(id, name, () => { if (_dueList.Count > 0 && _dueList[0].Id != id) NextDue(); });
+    }
+
+    private async Task LoadDueAsync()
+    {
+        if (!CanBilling) return;
+        try
+        {
+            var d = await S.Api.GetAsync("/api/v1/customers/charges-due");
+            _dueList = d.GetProperty("due").EnumerateArray().Where(x => x.GetProperty("hasPhone").GetBoolean())
+                .Select(x => (x.GetProperty("id").GetGuid(), x.GetProperty("name").GetString()!)).ToList();
+            var names = _dueList.Select(x => x.Name).ToList();
+            DueText = names.Count == 0 ? "" : $"Hoje tem {names.Count} cobrança(s) do fiado para mandar ({AppServices.Money(d.GetProperty("totalDueCents").GetInt64())}): "
+                + string.Join(", ", names.Take(4)) + (names.Count > 4 ? $" e mais {names.Count - 4}" : "");
+        }
+        catch (ApiException) { DueText = ""; }
+        catch (HttpRequestException) { DueText = ""; }
+    }
+
+    /// <summary>Usado só pelas capturas de tela.</summary>
+    public void SetDueForPreview(string text) => DueText = text;
 
     /// <summary>Usado só pelas capturas de tela.</summary>
     public void SetBillingForPreview(int? day, string? last)
@@ -369,7 +417,7 @@ public sealed class CustomersViewModel : OwnerPage
     }
 
     private static string BillingLabel(int? day, string? last) =>
-        (day is null ? "Cobrança automática desligada" : $"Cobrança automática: todo dia {day}") + (last is null ? "" : $"\nÚltima: {last}");
+        (day is null ? "Sem dia de cobrança" : $"Cobrança todo dia {day}") + (last is null ? "" : $"\nÚltima: {last}");
 
     public bool HasSelection => Selected is not null;
     public CustomerRow? Selected { get => _selected; set { if (Set(ref _selected, value)) { Raise(nameof(HasSelection)); if (value is not null) _ = LoadDetailAsync(value); } } }
@@ -386,6 +434,7 @@ public sealed class CustomersViewModel : OwnerPage
         foreach (var c in (await S.Api.GetAsync("/api/v1/customers" + (Query.Trim().Length > 0 ? "?q=" + Uri.EscapeDataString(Query.Trim()) : ""))).EnumerateArray())
             Customers.Add(new CustomerRow(c.GetProperty("id").GetGuid(), c.GetProperty("name").GetString()!, Str(c, "document"), Str(c, "phone"), Str(c, "email"), c.GetProperty("marketingConsent").GetBoolean()));
         Selected = Customers.FirstOrDefault();
+        await LoadDueAsync();
     }
 
     private static string Str(JsonElement e, string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";

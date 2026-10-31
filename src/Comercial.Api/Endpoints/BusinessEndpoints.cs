@@ -222,7 +222,18 @@ public static class BusinessEndpoints
             var m = await s.SendChargeAsync(id, automatic: false, ct);
             return Results.Ok(new { m.Id, m.Status, m.Preview });
         }).RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceManage, write: true);
+        // Modo grátis: o sistema monta a mensagem e o dono manda pelo WhatsApp da loja (celular ou computador).
+        api.MapGet("/customers/{id:guid}/charge-free", async (Guid id, WhatsAppService s) => Results.Ok(await s.FreeChargeAsync(id)))
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceRead);
+        api.MapPost("/customers/{id:guid}/charge-free/sent", async (Guid id, WhatsAppService s) => { await s.MarkFreeChargeAsync(id); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceRead, write: true);
+        api.MapGet("/customers/charges-due", async (WhatsAppService s) => Results.Ok(await s.ChargesDueAsync()))
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.FinanceRead);
         var wa = api.MapGroup("/whatsapp");
+        wa.MapGet("/campaigns/{id:guid}/manual-queue", async (Guid id, WhatsAppService s) => Results.Ok(await s.ManualQueueAsync(id)))
+            .RequireFeature(ModuleKeys.Campaigns, Permissions.MessagingManage);
+        wa.MapPost("/campaigns/{id:guid}/manual-sent", async (Guid id, ManualSentRequest r, WhatsAppService s) => { await s.MarkManualSentAsync(id, r.CustomerId); return Results.NoContent(); })
+            .RequireFeature(ModuleKeys.Campaigns, Permissions.MessagingManage, write: true);
         wa.MapGet("/settings", async (WhatsAppService s) => Results.Ok(await s.GetSettingsAsync()))
             .RequireFeature(ModuleKeys.Crm, Permissions.MessagingManage);
         wa.MapPut("/settings", async (WhatsAppSettingsRequest r, WhatsAppService s, CancellationToken ct) => Results.Ok(await s.SaveSettingsAsync(r, ct)))

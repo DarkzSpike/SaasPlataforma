@@ -3095,3 +3095,21 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031172147_CampanhaGratis') THEN
+    ALTER TABLE whatsapp_campaigns ADD "Manual" boolean NOT NULL DEFAULT FALSE;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM __ef_migrations WHERE "MigrationId" = '20261031172147_CampanhaGratis') THEN
+    INSERT INTO __ef_migrations ("MigrationId", "ProductVersion")
+    VALUES ('20261031172147_CampanhaGratis', '10.0.13');
+    END IF;
+END $EF$;
+COMMIT;
+

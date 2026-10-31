@@ -3608,6 +3608,9 @@ namespace Comercial.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("FinishedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("Manual")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasMaxLength(600)

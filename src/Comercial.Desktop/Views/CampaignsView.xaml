@@ -20,6 +20,8 @@
                 <TextBlock Grid.Column="1" Text="{Binding LimitsText}" Foreground="White" TextWrapping="Wrap" LineHeight="22" VerticalAlignment="Center" Margin="0,0,16,0"/>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE711;" Content="Cancelar campanha" Padding="14,0" Margin="0,0,10,0" Command="{Binding CancelCommand}"/>
+                    <Button Style="{StaticResource DarkButton}" local:Ui.Icon="&#xE724;" Content="Mandar agora" Padding="14,0" Margin="0,0,10,0" Command="{Binding SendNowCommand}"
+                            ToolTip="Abre o WhatsApp da loja para cada cliente com a mensagem pronta (campanha grátis)"/>
                     <Button Style="{StaticResource AccentButton}" local:Ui.Icon="&#xE710;" Content="Nova campanha" Command="{Binding NewCommand}"/>
                 </StackPanel>
             </Grid>
@@ -29,7 +31,7 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Campanha" Binding="{Binding Title}" Width="220"/>
                     <DataGridTextColumn Header="Quando" Binding="{Binding When}" Width="160"/>
-                    <DataGridTextColumn Header="Situação" Binding="{Binding Status}" Width="120"/>
+                    <DataGridTextColumn Header="Situação" Binding="{Binding Status}" Width="200"/>
                     <DataGridTextColumn Header="Envio" Binding="{Binding Progress}" Width="260"/>
                     <DataGridTextColumn Header="Mensagem" Binding="{Binding Message}" Width="*"/>
                 </DataGrid.Columns>

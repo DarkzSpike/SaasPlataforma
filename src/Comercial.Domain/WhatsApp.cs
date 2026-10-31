@@ -37,6 +37,8 @@ public static class WhatsAppKinds
     public const string Charge = "charge";
     public const string Promo = "promo";
     public const string Test = "test";
+    /// <summary>Status de mensagem mandada à mão pelo WhatsApp da loja (modo grátis).</summary>
+    public const string ManualStatus = "manual";
 }
 
 /// <summary>Registro de cada mensagem enviada (ou recusada): controle de limite, de repetição e auditoria.</summary>
@@ -46,7 +48,7 @@ public class WhatsAppMessage : TenantEntity
     public Guid? CampaignId { get; set; }
     public string Kind { get; set; } = WhatsAppKinds.Charge;
     public string Phone { get; set; } = "";
-    /// <summary>sent | failed</summary>
+    /// <summary>sent | failed | manual (aberta no WhatsApp da loja pelo dono, envio grátis)</summary>
     public string Status { get; set; } = "sent";
     public string? ProviderMessageId { get; set; }
     public string? Error { get; set; }
@@ -73,6 +75,11 @@ public class WhatsAppCampaign : TenantEntity
     public string Message { get; set; } = "";
     public DateTimeOffset ScheduledAt { get; set; }
     public string Status { get; set; } = CampaignStatus.Scheduled;
+    /// <summary>
+    /// Grátis: o sistema não envia nada sozinho. Na hora marcada o dono recebe o aviso e manda uma por uma pelo
+    /// WhatsApp do celular/computador, com a mensagem pronta. Falso = envio automático pela API oficial (pago).
+    /// </summary>
+    public bool Manual { get; set; }
     public int Sent { get; set; }
     public int Failed { get; set; }
     public string? StopReason { get; set; }

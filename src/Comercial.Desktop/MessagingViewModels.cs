@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
 using System.Text.Json;
+using System.Windows;
 using Comercial.Desktop.Core;
 
 namespace Comercial.Desktop;
@@ -99,10 +101,11 @@ public sealed class SettingsViewModel : OwnerPage
         Messages.Clear();
         foreach (var m in (await S.Api.GetAsync("/api/v1/whatsapp/messages")).EnumerateArray())
         {
-            var failed = m.GetProperty("status").GetString() != "sent";
+            var status = m.GetProperty("status").GetString();
+            var failed = status == "failed";
             var kind = m.GetProperty("kind").GetString() switch { "charge" => "Cobrança", "promo" => "Promoção", _ => "Teste" };
             Messages.Add(new WaMessageRow(m.GetProperty("createdAt").GetDateTimeOffset().LocalDateTime.ToString("dd/MM HH:mm"), kind,
-                Str(m, "customer") is { Length: > 0 } c ? c : Str(m, "phone"), failed ? "Falhou" : "Enviada", failed ? Str(m, "error") : Str(m, "preview"), failed));
+                Str(m, "customer") is { Length: > 0 } c ? c : Str(m, "phone"), failed ? "Falhou" : status == "manual" ? "Pelo WhatsApp (grátis)" : "Enviada", failed ? Str(m, "error") : Str(m, "preview"), failed));
         }
     }
 
@@ -146,7 +149,7 @@ public sealed class SettingsViewModel : OwnerPage
             Message = "No painel da Meta (developers.facebook.com > seu app > WhatsApp > Configuração da API) copie a Identificação do número de telefone e um token de acesso permanente (usuário do sistema). O token fica guardado criptografado.",
             ConfirmText = "Conectar",
         };
-        f.Fields.Add(new FormField("id", "Identificação do número de telefone", "", Icons.Edit, "só números"));
+        f.Fields.Add(new FormField("id", "Identificação do número de telefone (NÃO é o celular)", "", Icons.Edit, "código da Meta, ex.: 109876543210987"));
         f.Fields.Add(new FormField("token", "Token de acesso", "", Icons.Edit, Connected ? "vazio = manter o atual" : "EAAG..."));
         f.Fields.Add(new FormField("secret", "Chave secreta do app (opcional, para o SAIR)", "", Icons.Edit, "Configurações do app > Básico"));
         Shell.ShowForm(f, async form =>
@@ -244,7 +247,7 @@ public sealed class SettingsViewModel : OwnerPage
     }
 }
 
-public sealed record CampaignRow(Guid Id, string Title, string When, string Status, string Progress, string Message, bool CanCancel);
+public sealed record CampaignRow(Guid Id, string Title, string When, string Status, string Progress, string Message, bool CanCancel, bool Manual = false, bool CanSendNow = false);
 
 /// <summary>Promoções em massa pelo WhatsApp da loja, com os limites anti-spam do servidor à vista.</summary>
 public sealed class CampaignsViewModel(ShellViewModel shell) : OwnerPage(shell, "Campanhas", "Promoções pelo WhatsApp da loja, só para quem aceitou receber ofertas")
@@ -267,8 +270,12 @@ public sealed class CampaignsViewModel(ShellViewModel shell) : OwnerPage(shell, 
     private void Fill(JsonElement r)
     {
         _ready = r.GetProperty("connected").GetBoolean() && r.GetProperty("promotionsEnabled").GetBoolean();
-        Info = _ready ? "" : "Para enviar promoções, conecte o WhatsApp da loja e ligue as promoções na engrenagem (canto de cima) > WhatsApp > Opções.";
-        LimitsText = $"Hoje: {r.GetProperty("sentToday").GetInt32()} de {r.GetProperty("dailyLimit").GetInt32()} promoções  •  "
+        var manualLimit = r.TryGetProperty("manualDailyLimit", out var ml) ? ml.GetInt32() : 50;
+        var manualToday = r.TryGetProperty("sentTodayManual", out var mt) ? mt.GetInt32() : 0;
+        Info = _ready ? "" : "Grátis: na hora marcada o sistema avisa você (no app e aqui) e o WhatsApp da loja abre com a mensagem pronta para cada cliente. "
+            + "Para envio automático, conecte a API oficial na engrenagem > WhatsApp (pago, cobrado pela Meta).";
+        LimitsText = (_ready ? $"Hoje: {r.GetProperty("sentToday").GetInt32()} de {r.GetProperty("dailyLimit").GetInt32()} automáticas  •  " : "")
+            + $"Grátis: {manualToday} de {manualLimit} hoje  •  "
             + $"{r.GetProperty("eligibleNow").GetInt32()} cliente(s) podem receber agora (de {r.GetProperty("consenting").GetInt32()} que aceitaram ofertas)\n"
             + $"Cada cliente recebe no máximo 1 promoção a cada {r.GetProperty("intervalDays").GetInt32()} dias  •  envios só das {r.GetProperty("sendFromHour").GetInt32()}h às {r.GetProperty("sendUntilHour").GetInt32()}h  •  "
             + "1 campanha por dia e até 3 por semana  •  quem responder SAIR não recebe mais";
@@ -276,14 +283,18 @@ public sealed class CampaignsViewModel(ShellViewModel shell) : OwnerPage(shell, 
         foreach (var c in r.GetProperty("campaigns").EnumerateArray())
         {
             var status = c.GetProperty("status").GetString();
+            var manual = c.TryGetProperty("manual", out var mn) && mn.GetBoolean();
             var reason = c.TryGetProperty("stopReason", out var sr) && sr.ValueKind == JsonValueKind.String ? " • " + sr.GetString() : "";
             Campaigns.Add(new CampaignRow(c.GetProperty("id").GetGuid(), c.GetProperty("title").GetString()!,
                 c.GetProperty("scheduledAt").GetDateTimeOffset().LocalDateTime.ToString("dd/MM/yyyy HH:mm"),
-                status switch { "scheduled" => "Agendada", "sending" => "Enviando", "done" => "Concluída", "cancelled" => "Cancelada", _ => "Parada" },
-                $"{c.GetProperty("sent").GetInt32()} enviada(s) • {c.GetProperty("failed").GetInt32()} falha(s){reason}",
-                c.GetProperty("message").GetString()!, status is "scheduled" or "sending"));
+                (manual ? "Grátis • " : "Automática • ") + status switch { "scheduled" => "Agendada", "sending" => manual ? "Na hora de mandar" : "Enviando", "done" => "Concluída", "cancelled" => "Cancelada", _ => "Parada" },
+                manual ? $"{c.GetProperty("sent").GetInt32()} mandada(s) pelo WhatsApp" : $"{c.GetProperty("sent").GetInt32()} enviada(s) • {c.GetProperty("failed").GetInt32()} falha(s){reason}",
+                c.GetProperty("message").GetString()!, status is "scheduled" or "sending",
+                manual, manual && status == "sending" || manual && status == "scheduled" && c.GetProperty("scheduledAt").GetDateTimeOffset() <= DateTimeOffset.Now));
         }
     }
+
+    private static readonly string[] Modes = ["Grátis: o sistema me avisa e eu mando pelo WhatsApp da loja", "Automática pela API oficial (paga)"];
 
     public RelayCommand NewCommand => RelayCommand.Sync(_ =>
     {
@@ -291,9 +302,10 @@ public sealed class CampaignsViewModel(ShellViewModel shell) : OwnerPage(shell, 
         var f = new FormViewModel
         {
             Title = "Nova campanha de promoção",
-            Message = "A mensagem entra no modelo aprovado: \"Olá, [nome]! Novidade da [loja]: [sua mensagem]\". Seja direto e use no máximo um link.",
+            Message = "A mensagem vai assim: \"Olá, [nome]! Novidade da [loja]: [sua mensagem]\". Seja direto e use no máximo um link. Só recebe quem aceitou ofertas.",
             ConfirmText = "Agendar",
         };
+        f.Fields.Add(new FormField("mode", "Como mandar", Modes[0], options: _ready ? Modes : [Modes[0]]));
         f.Fields.Add(new FormField("title", "Nome da campanha (só para você)", "", Icons.Edit, "ex.: Promoção de sábado"));
         f.Fields.Add(new FormField("message", "Mensagem", "", Icons.Edit, "ex.: Tudo com 10% de desconto neste sábado!"));
         f.Fields.Add(new FormField("date", "Dia", start.ToString("dd/MM/yyyy"), Icons.Edit));
@@ -304,16 +316,58 @@ public sealed class CampaignsViewModel(ShellViewModel shell) : OwnerPage(shell, 
             { form.Error = "Data no formato 31/12/2026 e hora 14:30."; return false; }
             try
             {
-                await S.Api.PostAsync("/api/v1/whatsapp/campaigns", new { title = form["title"], message = form["message"], scheduledAt = new DateTimeOffset(when) });
+                var manual = form["mode"] != Modes[1];
+                await S.Api.PostAsync("/api/v1/whatsapp/campaigns", new { title = form["title"], message = form["message"], scheduledAt = new DateTimeOffset(when), manual });
                 await LoadAsync();
-                Info = "Campanha agendada. O envio é feito aos poucos, dentro dos limites.";
+                Info = manual ? "Campanha agendada. Na hora marcada o sistema avisa você para mandar (no app e aqui em Promoções > Mandar agora)."
+                    : "Campanha agendada. O envio é feito aos poucos, dentro dos limites.";
                 return true;
             }
             catch (ApiException ex) { form.Error = ex.Code is "not_found" or "forbidden" ? "Falha: " + ex.Code : ex.Message; }
             catch (HttpRequestException) { form.Error = "Sem conexão com o servidor."; }
             return false;
         });
-    }, _ => _ready);
+    });
+
+    /// <summary>Campanha grátis: abre o WhatsApp da loja para cada cliente, um depois do outro, com a mensagem pronta.</summary>
+    public RelayCommand SendNowCommand => RelayCommand.Sync(_ => _ = NextManualAsync(Selected!.Id, 0), _ => Selected is { CanSendNow: true });
+
+    private async Task NextManualAsync(Guid id, int done)
+    {
+        try
+        {
+            var q = await S.Api.GetAsync($"/api/v1/whatsapp/campaigns/{id}/manual-queue");
+            var queue = q.GetProperty("queue");
+            if (queue.GetArrayLength() == 0)
+            {
+                await LoadAsync();
+                var left = q.GetProperty("remaining").GetInt32();
+                Info = left > 0 ? $"Limite de hoje atingido ({q.GetProperty("dailyLimit").GetInt32()} promoções grátis por dia, para o número não ser bloqueado). Faltam {left}: continue amanhã."
+                    : done > 0 ? $"Pronto: {done} mensagem(ns) aberta(s) agora. Campanha concluída." : "Ninguém para mandar agora.";
+                return;
+            }
+            var next = queue[0];
+            var customerId = next.GetProperty("customerId").GetGuid();
+            var link = next.GetProperty("link").GetString()!;
+            Shell.ShowPrompt(new PromptViewModel
+            {
+                Title = $"Mandar promoção ({done + 1} de {Math.Min(q.GetProperty("remaining").GetInt32(), queue.GetArrayLength()) + done})",
+                Message = $"Para: {next.GetProperty("name").GetString()}\n\nO WhatsApp da loja abre com a mensagem pronta: confira, aperte Enviar e volte aqui para o próximo.",
+                ConfirmText = "Abrir no WhatsApp",
+            }, async p =>
+            {
+                try { Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); }
+                catch (Exception) { p.Error = "Não consegui abrir o WhatsApp neste computador."; return false; }
+                try { await S.Api.PostAsync($"/api/v1/whatsapp/campaigns/{id}/manual-sent", new { customerId }); }
+                catch (ApiException ex) { p.Error = ex.Message; return false; }
+                catch (HttpRequestException) { p.Error = "Sem conexão com o servidor."; return false; }
+                _ = Application.Current.Dispatcher.BeginInvoke(() => _ = NextManualAsync(id, done + 1));
+                return true;
+            }, () => _ = LoadAsync());
+        }
+        catch (ApiException ex) { Info = "Falha: " + ex.Message; }
+        catch (HttpRequestException) { Info = "Sem conexão com o servidor."; }
+    }
 
     public RelayCommand CancelCommand => RelayCommand.Sync(_ => Shell.ShowPrompt(new PromptViewModel
     {
@@ -328,10 +382,10 @@ public sealed class CampaignsViewModel(ShellViewModel shell) : OwnerPage(shell, 
 
     /// <summary>Usado só pelas capturas de tela.</summary>
     public void SetForPreview() => Fill(JsonDocument.Parse("""
-        {"connected":true,"promotionsEnabled":true,"dailyLimit":200,"intervalDays":7,"sentToday":120,"eligibleNow":64,"consenting":310,"sendFromHour":9,"sendUntilHour":20,
+        {"connected":false,"promotionsEnabled":false,"dailyLimit":200,"intervalDays":7,"sentToday":0,"manualDailyLimit":50,"sentTodayManual":12,"eligibleNow":64,"consenting":310,"sendFromHour":9,"sendUntilHour":20,
          "campaigns":[
-          {"id":"5b1e7c1a-0000-4000-8000-000000000001","title":"Promoção de sábado","message":"Tudo com 10% de desconto neste sábado!","scheduledAt":"2026-10-31T13:00:00Z","status":"sending","sent":120,"failed":2,"stopReason":null},
-          {"id":"5b1e7c1a-0000-4000-8000-000000000002","title":"Dia das crianças","message":"Brinquedos com até 30% off até domingo.","scheduledAt":"2026-10-10T14:00:00Z","status":"done","sent":288,"failed":4,"stopReason":null},
-          {"id":"5b1e7c1a-0000-4000-8000-000000000003","title":"Black Friday","message":"Black Friday chegando: prepare a lista!","scheduledAt":"2026-11-27T12:00:00Z","status":"scheduled","sent":0,"failed":0,"stopReason":null}]}
+          {"id":"5b1e7c1a-0000-4000-8000-000000000001","title":"Promoção de sábado","message":"Tudo com 10% de desconto neste sábado!","scheduledAt":"2026-10-31T13:00:00Z","status":"sending","sent":12,"failed":0,"stopReason":null,"manual":true},
+          {"id":"5b1e7c1a-0000-4000-8000-000000000002","title":"Dia das crianças","message":"Brinquedos com até 30% off até domingo.","scheduledAt":"2026-10-10T14:00:00Z","status":"done","sent":46,"failed":0,"stopReason":null,"manual":true},
+          {"id":"5b1e7c1a-0000-4000-8000-000000000003","title":"Black Friday","message":"Black Friday chegando: prepare a lista!","scheduledAt":"2026-11-27T12:00:00Z","status":"scheduled","sent":0,"failed":0,"stopReason":null,"manual":true}]}
         """).RootElement);
 }

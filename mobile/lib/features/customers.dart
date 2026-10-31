@@ -2,13 +2,67 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../core/api_client.dart';
 import '../core/session.dart';
+import 'promos.dart';
 
 final _money = NumberFormat.simpleCurrency(locale: 'pt_BR');
 final _date = DateFormat('dd/MM/yyyy');
 final _qty = NumberFormat('#,##0.###', 'pt_BR');
 String _brl(num cents) => _money.format(cents / 100);
+
+/// Cobrança grátis: mostra a mensagem (saldo e o que levou em cada dia) e abre o WhatsApp da loja na conversa
+/// do cliente com o texto pronto. Devolve true quando abriu (fica registrado e sai da lista do dia).
+Future<bool> chargeByWhatsApp(BuildContext context, ApiClient api, String id, String name) async {
+  void snack(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  try {
+    final p = await api.get('/api/v1/customers/$id/charge-free');
+    if (!context.mounted) return false;
+    if (p['canSend'] != true) {
+      snack((p['reason'] as String?) ?? 'Não dá para cobrar agora.');
+      return false;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Cobrar $name'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(p['text'] as String),
+            const SizedBox(height: 12),
+            Text('O WhatsApp da loja abre com essa mensagem pronta. É só apertar Enviar. (Grátis)',
+                style: TextStyle(fontSize: 12, color: Theme.of(c).colorScheme.outline)),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Voltar')),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
+            onPressed: () => Navigator.pop(c, true),
+            icon: const Icon(Icons.chat),
+            label: const Text('Abrir no WhatsApp'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return false;
+    if (!await launchUrl(Uri.parse(p['link'] as String), mode: LaunchMode.externalApplication)) {
+      if (context.mounted) snack('Não consegui abrir o WhatsApp neste celular.');
+      return false;
+    }
+    try {
+      await api.post('/api/v1/customers/$id/charge-free/sent', {});
+    } catch (_) {
+      // A mensagem já abriu; só não ficou registrada.
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) snack(e is ApiException ? e.message : 'Sem conexão com o servidor.');
+    return false;
+  }
+}
 
 /// Clientes e fiado no celular: quanto a loja tem para receber, quem está devendo, o limite de cada um
 /// e o que cada cliente levou no fiado. O servidor confere permissão e limite de novo a cada pedido.
@@ -24,6 +78,7 @@ enum _Filter { owing, limit, all }
 
 class _CustomersPageState extends State<CustomersPage> {
   Map<String, dynamic>? data;
+  List<Map<String, dynamic>> due = [];
   String? error;
   bool loading = true;
   String search = '';
@@ -39,8 +94,15 @@ class _CustomersPageState extends State<CustomersPage> {
     setState(() => loading = true);
     try {
       final d = await widget.api.get('/api/v1/customers/credit-overview');
+      var today = <Map<String, dynamic>>[];
+      if (widget.me.chargesByWhatsApp) {
+        try {
+          today = ((await widget.api.get('/api/v1/customers/charges-due'))['due'] as List).cast<Map<String, dynamic>>();
+        } catch (_) {}
+      }
       setState(() {
         data = d;
+        due = today;
         error = null;
       });
     } catch (e) {
@@ -70,12 +132,51 @@ class _CustomersPageState extends State<CustomersPage> {
     final cs = Theme.of(context).colorScheme;
     final rows = _rows;
     return Scaffold(
-      appBar: AppBar(title: const Text('Clientes e fiado'), actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))]),
+      appBar: AppBar(title: const Text('Clientes e fiado'), actions: [
+        if (widget.me.sendsPromos)
+          IconButton(
+            tooltip: 'Promoções pelo WhatsApp',
+            icon: const Icon(Icons.campaign_outlined),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PromosPage(api: widget.api))),
+          ),
+        IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
+      ]),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
           if (loading && data == null) const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator())),
           if (error != null) Card(child: ListTile(leading: Icon(Icons.warning_amber, color: cs.error), title: Text(error!))),
+          if (due.isNotEmpty)
+            Card(
+              color: const Color(0xFF25D366).withValues(alpha: 0.12),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.notifications_active_outlined, color: Color(0xFF25D366)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text('Cobranças de hoje (${due.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                  ]),
+                  const SizedBox(height: 4),
+                  const Text('Toque em Cobrar: o WhatsApp da loja abre com a mensagem pronta (grátis).', style: TextStyle(fontSize: 12)),
+                  for (final c in due)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(c['name'] as String),
+                      subtitle: Text(c['hasPhone'] == true ? 'Deve ${_brl(c['openCents'] as num)}' : 'Deve ${_brl(c['openCents'] as num)} • sem celular no cadastro'),
+                      trailing: FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
+                        onPressed: c['hasPhone'] == true
+                            ? () async {
+                                if (await chargeByWhatsApp(context, widget.api, c['id'] as String, c['name'] as String)) _load();
+                              }
+                            : null,
+                        child: const Text('Cobrar'),
+                      ),
+                    ),
+                ]),
+              ),
+            ),
           if (data != null) ...[
             Row(children: [
               Expanded(child: _Tile(label: 'Total no fiado', value: _brl(data!['totalOpenCents'] as num), color: cs.primary, big: true)),
@@ -268,28 +369,7 @@ class _CustomerCreditPageState extends State<_CustomerCreditPage> {
   Future<void> _charge() async {
     setState(() => busy = true);
     try {
-      final p = await widget.api.get('/api/v1/customers/$_id/charge-preview');
-      if (!mounted) return;
-      if (p['canSend'] != true) {
-        _snack((p['reason'] as String?) ?? 'Não dá para cobrar agora.');
-        return;
-      }
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: Text('Cobrar no WhatsApp (${p['phone']})'),
-          content: SingleChildScrollView(child: Text(p['text'] as String? ?? '')),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-            FilledButton.icon(onPressed: () => Navigator.pop(c, true), icon: const Icon(Icons.send), label: const Text('Enviar')),
-          ],
-        ),
-      );
-      if (ok != true) return;
-      await widget.api.post('/api/v1/customers/$_id/charge', {});
-      _snack('Cobrança enviada pelo WhatsApp da loja.');
-    } catch (e) {
-      _snack(e is ApiException ? e.message : 'Sem conexão com o servidor.');
+      await chargeByWhatsApp(context, widget.api, _id, widget.customer['name'] as String);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -328,12 +408,12 @@ class _CustomerCreditPageState extends State<_CustomerCreditPage> {
                       onTap: _canManage && !busy ? _editLimit : null,
                     ),
                   ),
-                  if (_canManage && (s['openCents'] as num) > 0)
+                  if (widget.me.chargesByWhatsApp && (s['openCents'] as num) > 0)
                     Card(
                       child: ListTile(
                         leading: const Icon(Icons.chat_outlined, color: Color(0xFF25D366)),
                         title: const Text('Cobrar no WhatsApp'),
-                        subtitle: const Text('Manda quanto ele deve e o que levou, pelo WhatsApp da loja'),
+                        subtitle: const Text('Abre o WhatsApp da loja com quanto ele deve e o que levou (grátis)'),
                         onTap: busy ? null : _charge,
                       ),
                     ),
