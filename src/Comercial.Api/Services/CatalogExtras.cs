@@ -215,7 +215,52 @@ public sealed class CreditService(AppDbContext db, AuditService audit, RequestAc
         var titles = await db.FinancialTitles.AsNoTracking().Where(t => t.CustomerId == customerId && t.Category == Category)
             .OrderByDescending(t => t.CreatedAt).Take(100).Select(t => new { t.Id, t.Description, t.DueDate, t.AmountCents, status = t.Status.ToString(), t.PaidOn, t.PaidAmountCents }).ToListAsync();
         var open = await OpenBalanceAsync(customerId);
-        return new { customer = c.Name, limitCents = c.CreditLimitCents, openCents = open, availableCents = Math.Max(0, c.CreditLimitCents - open), titles };
+        // O que foi levado em cada compra que ainda está em aberto (o app mostra produto por produto).
+        var saleIds = await db.FinancialTitles.AsNoTracking()
+            .Where(t => t.CustomerId == customerId && t.Category == Category && t.Status == TitleStatus.Open && t.SaleId != null)
+            .Select(t => t.SaleId!.Value).Distinct().ToListAsync();
+        var purchases = (await db.Sales.AsNoTracking().Where(s => saleIds.Contains(s.Id))
+                .Select(s => new { s.Id, s.ReceivedAt, items = s.Items.Select(i => new { i.ProductName, i.Quantity, i.TotalCents }).ToList() }).ToListAsync())
+            .OrderByDescending(s => s.ReceivedAt).ToList();
+        return new { customer = c.Name, limitCents = c.CreditLimitCents, openCents = open, availableCents = Math.Max(0, c.CreditLimitCents - open), titles, purchases };
+    }
+
+    /// <summary>
+    /// Fiado da loja inteira: quem está devendo, quanto, o limite de cada um e os totais (tela Clientes do app).
+    /// </summary>
+    public async Task<object> OverviewAsync()
+    {
+        var today = DateOnly.FromDateTime(clock.GetUtcNow().ToOffset(TimeSpan.FromHours(-3)).Date);
+        var titles = await db.FinancialTitles.AsNoTracking()
+            .Where(t => t.Kind == TitleKind.Receivable && t.Status == TitleStatus.Open && t.Category == Category && t.CustomerId != null)
+            .Select(t => new { CustomerId = t.CustomerId!.Value, t.AmountCents, t.DueDate, t.SaleId }).ToListAsync();
+        var byCustomer = titles.GroupBy(t => t.CustomerId).ToDictionary(g => g.Key, g => new
+        {
+            open = g.Sum(t => t.AmountCents),
+            overdue = g.Where(t => t.DueDate < today).Sum(t => t.AmountCents),
+            oldestDue = g.Min(t => t.DueDate),
+        });
+        var saleIds = titles.Where(t => t.SaleId != null).Select(t => t.SaleId!.Value).Distinct().ToList();
+        var items = saleIds.Count == 0 ? 0m : (await db.Sales.AsNoTracking().Where(s => saleIds.Contains(s.Id)).SelectMany(s => s.Items).Select(i => i.Quantity).ToListAsync()).Sum();
+        var debtorIds = byCustomer.Keys.ToList();
+        var customers = await db.Customers.AsNoTracking()
+            .Where(c => c.IsActive && c.AnonymizedAt == null && (c.CreditLimitCents > 0 || debtorIds.Contains(c.Id)))
+            .Select(c => new { c.Id, c.Name, c.Phone, c.CreditLimitCents, c.BillingDay }).ToListAsync();
+        var rows = customers.Select(c =>
+        {
+            var b = byCustomer.GetValueOrDefault(c.Id);
+            var open = b?.open ?? 0;
+            return new
+            {
+                c.Id, c.Name, c.Phone, limitCents = c.CreditLimitCents, openCents = open, availableCents = Math.Max(0, c.CreditLimitCents - open),
+                overdueCents = b?.overdue ?? 0, oldestDue = b?.oldestDue, c.BillingDay,
+            };
+        }).OrderByDescending(r => r.openCents).ThenBy(r => r.Name).ToList();
+        return new
+        {
+            totalOpenCents = rows.Sum(r => r.openCents), overdueCents = rows.Sum(r => r.overdueCents), debtors = rows.Count(r => r.openCents > 0),
+            itemsQuantity = items, totalLimitCents = rows.Sum(r => r.limitCents), customers = rows,
+        };
     }
 
     /// <summary>Recebe um valor do cliente e baixa as contas mais antigas primeiro. Dinheiro entra no caixa aberto.</summary>

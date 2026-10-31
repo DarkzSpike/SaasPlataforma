@@ -11,6 +11,7 @@ import 'core/session.dart';
 import 'core/session_store.dart';
 import 'features/invoices.dart';
 import 'features/notifications.dart';
+import 'features/customers.dart';
 import 'features/finance.dart';
 import 'features/owner.dart';
 import 'features/products.dart';
@@ -223,6 +224,8 @@ class _HomeShellState extends State<HomeShell> {
         (page: ProductsPage(api: widget.api, me: m, storeId: storeId!), dest: const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Produtos'), fab: false),
       if (m.managesTeam)
         (page: TeamPage(api: widget.api), dest: const NavigationDestination(icon: Icon(Icons.group_outlined), label: 'Equipe'), fab: true),
+      if (m.seesCustomers)
+        (page: CustomersPage(api: widget.api, me: m), dest: const NavigationDestination(icon: Icon(Icons.people_alt_outlined), label: 'Clientes'), fab: true),
       if (m.seesFinance)
         (page: FinancePage(api: widget.api, me: m), dest: const NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Financeiro'), fab: true),
       if (m.seesDashboard)

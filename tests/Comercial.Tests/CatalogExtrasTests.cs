@@ -156,6 +156,16 @@ public class CatalogExtrasTests(ApiFactory f) : IClassFixture<ApiFactory>
         var st = await Api.Expect(await api.Get($"/api/v1/customers/{cust}/credit", t.OwnerToken), HttpStatusCode.OK);
         Assert.Equal(3000, st.GetProperty("openCents").GetInt64());
         Assert.Equal(2000, st.GetProperty("availableCents").GetInt64());
+        Assert.Equal(1, st.GetProperty("purchases").GetArrayLength());
+        Assert.True(st.GetProperty("purchases")[0].GetProperty("items").GetArrayLength() > 0);
+        // Tela Clientes do app: quem deve, quanto e o total do fiado da loja.
+        var ov = await Api.Expect(await api.Get("/api/v1/customers/credit-overview", t.OwnerToken), HttpStatusCode.OK);
+        Assert.Equal(3000, ov.GetProperty("totalOpenCents").GetInt64());
+        Assert.Equal(1, ov.GetProperty("debtors").GetInt32());
+        Assert.True(ov.GetProperty("itemsQuantity").GetDecimal() > 0);
+        var row = ov.GetProperty("customers").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == cust);
+        Assert.Equal(5000, row.GetProperty("limitCents").GetInt64());
+        Assert.Equal(2000, row.GetProperty("availableCents").GetInt64());
         Assert.True((await Api.Expect(await api.Get($"/api/v1/pos/customers/{cust}/credit-check?amountCents=2000", op), HttpStatusCode.OK)).GetProperty("allowed").GetBoolean());
         var passa = await Api.Expect(await api.Get($"/api/v1/pos/customers/{cust}/credit-check?amountCents=2500", op), HttpStatusCode.OK);
         Assert.False(passa.GetProperty("allowed").GetBoolean());

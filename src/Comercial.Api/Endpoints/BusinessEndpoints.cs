@@ -188,6 +188,8 @@ public static class BusinessEndpoints
             .RequireFeature(ModuleKeys.Pdv, Permissions.SalesCreate);
 
         // ---------- Fiado (crediário) ----------
+        api.MapGet("/customers/credit-overview", async (CreditService s) => Results.Ok(await s.OverviewAsync()))
+            .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.CustomersRead);
         api.MapGet("/customers/{id:guid}/credit", async (Guid id, CreditService s) => Results.Ok(await s.StatementAsync(id)))
             .RequireFeature(ModuleKeys.PayablesReceivables, Permissions.CustomersRead);
         // Caixa: confere o limite ANTES de finalizar uma venda com parte no fiado (o servidor confere de novo ao receber a
